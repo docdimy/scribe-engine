@@ -3,7 +3,8 @@ LLM Service for Medical Analysis
 """
 import instructor
 from openai import AsyncOpenAI
-from app.config import settings
+from typing import Dict, Any
+from app.config import settings, ModelName
 from app.models.responses import AnalysisResult
 from app.core.logging import get_logger
 
@@ -89,21 +90,11 @@ Your analysis should include:
 
     async def get_available_models(self) -> Dict[str, Any]:
         """
-        Get available LLM models for medical analysis
-        
-        Returns:
-            Dictionary with model information
+        Get available OpenAI models for analysis
         """
+        # This is a placeholder; in a real-world scenario, you might
+        # query the OpenAI API or have a more dynamic way of getting models.
         return {
-            "current_model": self.default_model,
-            "available_models": [
-                "gpt-4.1-nano",
-                "gpt-4o-mini", 
-                "gpt-4o"
-            ],
-            "model_capabilities": {
-                "gpt-4.1-nano": "Optimized model for medical analysis with nano-scale precision",
-                "gpt-4o-mini": "Lightweight model for basic medical analysis",
-                "gpt-4o": "Full-featured model for complex medical reasoning"
-            }
+            "default": settings.default_llm_model,
+            "supported": [model.value for model in ModelName]
         } 
