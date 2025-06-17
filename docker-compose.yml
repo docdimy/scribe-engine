@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   scribe-engine:
+    container_name: scribe-engine-api
     build: .
     ports:
       - "3001:3001"
@@ -20,6 +21,7 @@ services:
     restart: unless-stopped
 
   redis:
+    container_name: scribe-engine-redis
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -29,6 +31,7 @@ services:
     restart: unless-stopped
 
   prometheus:
+    container_name: scribe-engine-prometheus
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
