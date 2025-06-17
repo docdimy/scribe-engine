@@ -281,7 +281,7 @@ async def transcribe_audio(
             xml_content = _create_xml_output(transcript, analysis)
             
         # 5. Clean up temporary file
-        background_tasks.add_task(audio_processor.cleanup_temp_file, processed_audio_path)
+        background_tasks.add_task(audio_processor.cleanup, processed_audio_path)
         
         # 6. Create final response
         processing_time_ms = int((time.time() - start_time) * 1000)
