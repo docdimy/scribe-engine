@@ -24,9 +24,9 @@ class TranscriptionResult(BaseModel):
         default=[],
         description="Einzelne Transkript-Segmente"
     )
-    language_detected: Optional[str] = Field(description="Erkannte Sprache (ISO 639-1)")
-    confidence: Optional[float] = Field(description="Durchschnittliche Konfidenz")
-    duration: Optional[float] = Field(description="Audio-Dauer in Sekunden")
+    language_detected: Optional[str] = Field(default=None, description="Erkannte Sprache (ISO 639-1)")
+    confidence: Optional[float] = Field(default=None, description="Durchschnittliche Konfidenz")
+    duration: Optional[float] = Field(default=None, description="Audio-Dauer in Sekunden")
 
 
 class AnalysisResult(BaseModel):
