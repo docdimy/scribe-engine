@@ -5,20 +5,20 @@ FHIR R4 Service for medical data conversion
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
-from fhir.resources.bundle import Bundle
-from fhir.resources.composition import Composition
-from fhir.resources.patient import Patient
-from fhir.resources.practitioner import Practitioner
-from fhir.resources.encounter import Encounter
-from fhir.resources.observation import Observation
-from fhir.resources.condition import Condition
-from fhir.resources.medicationstatement import MedicationStatement
-from fhir.resources.careplan import CarePlan
-from fhir.resources.media import Media
-from fhir.resources.codeableconcept import CodeableConcept
-from fhir.resources.coding import Coding
-from fhir.resources.reference import Reference
-from fhir.resources.narrative import Narrative
+from fhir.resources.R4B.bundle import Bundle
+from fhir.resources.R4B.composition import Composition
+from fhir.resources.R4B.patient import Patient
+from fhir.resources.R4B.practitioner import Practitioner
+from fhir.resources.R4B.encounter import Encounter
+from fhir.resources.R4B.observation import Observation
+from fhir.resources.R4B.condition import Condition
+from fhir.resources.R4B.medicationstatement import MedicationStatement
+from fhir.resources.R4B.careplan import CarePlan
+from fhir.resources.R4B.media import Media
+from fhir.resources.R4B.codeableconcept import CodeableConcept
+from fhir.resources.R4B.coding import Coding
+from fhir.resources.R4B.reference import Reference
+from fhir.resources.R4B.narrative import Narrative
 
 from app.models.responses import TranscriptionResult, AnalysisResult
 from app.core.logging import get_logger
