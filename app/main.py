@@ -255,7 +255,7 @@ async def transcribe_audio(
             file_path=processed_audio_path,
             language=language,
             diarization=diarization,
-            model=stt_model
+            stt_model=stt_model
         )
         
         # 3. Analyze transcript with LLM
