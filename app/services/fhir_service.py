@@ -56,9 +56,12 @@ class FHIRService:
         """
         
         try:
+            # FHIR-compliant ID by replacing invalid characters
+            fhir_bundle_id = request_id.replace("_", "-")
+
             # Create bundle
             bundle = Bundle(
-                id=request_id,
+                id=fhir_bundle_id,
                 type="document",
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
