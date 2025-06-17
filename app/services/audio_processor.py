@@ -10,7 +10,7 @@ from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
 from mutagen.mp4 import MP4
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, UploadFile
 from app.config import settings
 from app.core.logging import get_logger
 
@@ -32,6 +32,13 @@ class AudioProcessor:
         """
         audio_data = await file.read()
         content_type = file.content_type
+
+        # If content type is generic, try to detect it from file content
+        if content_type == "application/octet-stream":
+            logger.info(
+                f"Received generic '{content_type}'. Attempting to detect content type from file data."
+            )
+            content_type = self._detect_content_type_from_data(audio_data, file.filename)
 
         # 1. Validate Content-Type
         if content_type not in supported_types:
@@ -95,6 +102,44 @@ class AudioProcessor:
             "audio/ogg": ".ogg",
             "audio/webm": ".webm",
         }.get(content_type, ".tmp")
+
+    def _detect_content_type_from_data(self, audio_data: bytes, filename: Optional[str]) -> str:
+        """Detects Content-Type based on file signature or filename."""
+        # Check for MP4/M4A first, as 'ftyp' can be a few bytes in
+        if b'ftyp' in audio_data[4:12]:
+            logger.info("Detected content type: audio/mp4 (ftyp signature)")
+            return "audio/mp4"
+
+        signatures = {
+            b'ID3': "audio/mpeg",      # MP3 with ID3 Tag
+            b'\xff\xfb': "audio/mpeg",  # MP3 frame
+            b'\xff\xf3': "audio/mpeg",  # MP3 frame
+            b'\xff\xf2': "audio/mpeg",  # MP3 frame
+            b'RIFF': "audio/wav",      # WAV
+            b'OggS': "audio/ogg",      # OGG
+        }
+
+        for signature, detected_type in signatures.items():
+            if audio_data.startswith(signature):
+                logger.info(f"Detected content type: {detected_type} (signature)")
+                return detected_type
+
+        # Fallback to filename extension if detection fails
+        if filename:
+            ext_map = {
+                '.mp3': 'audio/mpeg',
+                '.wav': 'audio/wav',
+                '.m4a': 'audio/mp4',
+                '.mp4': 'audio/mp4',
+                '.ogg': 'audio/ogg',
+            }
+            _, ext = os.path.splitext(filename)
+            if ext.lower() in ext_map:
+                logger.info(f"Guessed content type from filename: {ext_map[ext.lower()]}")
+                return ext_map[ext.lower()]
+
+        logger.warning("Could not detect specific audio type. Falling back to 'application/octet-stream'.")
+        return "application/octet-stream"
 
     def _extract_metadata(self, file_path: str, content_type: str) -> Tuple[float, Dict[str, Any]]:
         """Extracts duration and other metadata using mutagen."""
