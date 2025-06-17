@@ -235,22 +235,24 @@ class FHIRService:
             "emergency": "EMER",    # emergency
             "notes": "AMB"
         }.get(conversation_type, "AMB")
-        
-        return Encounter(
-            id=str(uuid.uuid4()),
-            status="finished",
-            class_=Coding(
+
+        encounter_data = {
+            "id": str(uuid.uuid4()),
+            "status": "finished",
+            "class": Coding(
                 system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
                 code=class_code
             ),
-            subject=Reference(reference=f"Patient/{patient_id}"),
-            participant=[{
+            "subject": Reference(reference=f"Patient/{patient_id}"),
+            "participant": [{
                 "individual": Reference(reference=f"Practitioner/{practitioner_id}")
             }],
-            period={
+            "period": {
                 "start": datetime.utcnow().isoformat() + "Z"
             }
-        )
+        }
+        
+        return Encounter(**encounter_data)
     
     def _create_media_resource(self, transcript: TranscriptionResult, encounter_id: str) -> Media:
         """Create a Media resource for the transcript"""
