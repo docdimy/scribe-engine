@@ -241,7 +241,7 @@ async def transcribe_audio(
         
         # Process audio file
         with audio_processing_duration.time():
-            processed_audio_path, duration, file_metadata = await audio_processor.process_audio(
+            processed_audio_path, duration, file_metadata = await audio_processor.process_and_save_audio(
                 file=audio_file, 
                 max_duration=settings.max_audio_duration, 
                 max_size_mb=settings.max_file_size_mb,
