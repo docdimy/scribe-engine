@@ -22,7 +22,7 @@ from fhir.resources.R4B.narrative import Narrative
 
 from app.models.responses import TranscriptionResult, AnalysisResult
 from app.core.logging import get_logger
-from app.config import settings
+from app.config import settings, FHIRBundleType
 import base64
 import mimetypes
 
@@ -41,108 +41,82 @@ class FHIRService:
         analysis: AnalysisResult,
         request_id: str,
         specialty: Optional[str] = None,
-        conversation_type: str = "consultation"
+        conversation_type: str = "consultation",
+        bundle_type: FHIRBundleType = FHIRBundleType.DOCUMENT
     ) -> Dict[str, Any]:
         """
-        Create a FHIR R4 Bundle from transcript and analysis
-        
-        Args:
-            transcript: Transcription result
-            analysis: LLM analysis result  
-            request_id: Request ID
-            specialty: Medical specialty
-            conversation_type: Type of consultation
-            
-        Returns:
-            FHIR Bundle as Dictionary
+        Create a FHIR R4 Bundle from transcript and analysis.
+        Can generate a 'document' or 'transaction' type bundle.
         """
         
         try:
-            # FHIR-compliant ID by replacing invalid characters
-            fhir_bundle_id = request_id.replace("_", "-")
-
-            # Create bundle
-            bundle = Bundle(
-                id=fhir_bundle_id,
-                type="document",
-                timestamp=datetime.utcnow().isoformat() + "Z"
-            )
-            
-            entries = []
-            
-            # 1. Patient (placeholder)
+            # --- 1. Create all resources ---
             patient = self._create_patient_placeholder()
-            entries.append({
-                "fullUrl": f"{self.base_url}/Patient/{patient.id}",
-                "resource": patient.dict()
-            })
-            
-            # 2. Practitioner (placeholder)
             practitioner = self._create_practitioner_placeholder(specialty)
-            entries.append({
-                "fullUrl": f"{self.base_url}/Practitioner/{practitioner.id}",
-                "resource": practitioner.dict()
-            })
-            
-            # 3. Encounter (consultation)
             encounter = self._create_encounter(conversation_type, patient.id, practitioner.id)
-            entries.append({
-                "fullUrl": f"{self.base_url}/Encounter/{encounter.id}",
-                "resource": encounter.dict()
-            })
             
-            # Link resources in Composition
-            composition = self._create_composition(
-                transcript=transcript, 
-                analysis=analysis,
-                patient_ref=Reference(reference=f"Patient/{patient.id}"),
-                practitioner_ref=Reference(reference=f"Practitioner/{practitioner.id}"),
-                encounter_ref=Reference(reference=f"Encounter/{encounter.id}"),
-                specialty=specialty, 
-                conversation_type=conversation_type
-            )
-            # Add Composition as the first entry
-            entries.insert(0, {
-                "fullUrl": f"{self.base_url}/Composition/{composition.id}",
-                "resource": composition.dict()
-            })
+            # Create a list to hold all resources that will be part of the bundle
+            resources = [patient, practitioner, encounter]
             
-            # 4. Condition (diagnosis)
-            if analysis.diagnosis:
-                condition = self._create_condition(analysis.diagnosis, patient.id, encounter.id)
-                composition.section[0].entry.append(Reference(reference=f"Condition/{condition.id}"))
-                entries.append({
-                    "fullUrl": f"{self.base_url}/Condition/{condition.id}",
-                    "resource": condition.dict()
-                })
+            # Create clinical resources and add them to the list
+            condition = self._create_condition(analysis.diagnosis, patient.id, encounter.id) if analysis.diagnosis else None
+            if condition: resources.append(condition)
             
-            # 5. MedicationStatement (medication)
-            if analysis.medication:
-                medication_stmt = self._create_medication_statement(
-                    analysis.medication, patient.id, encounter.id
+            medication_stmt = self._create_medication_statement(analysis.medication, patient.id, encounter.id) if analysis.medication else None
+            if medication_stmt: resources.append(medication_stmt)
+            
+            care_plan = self._create_care_plan(analysis.treatment, analysis.follow_up, patient.id, encounter.id) if analysis.treatment or analysis.follow_up else None
+            if care_plan: resources.append(care_plan)
+
+            # --- 2. Assemble the bundle based on type ---
+            fhir_bundle_id = request_id.replace("_", "-")
+            
+            if bundle_type == FHIRBundleType.TRANSACTION:
+                # Create a transaction bundle
+                bundle_entries = []
+                for resource in resources:
+                    bundle_entries.append({
+                        "resource": resource.dict(),
+                        "request": {
+                            "method": "POST",
+                            "url": resource.resource_type
+                        }
+                    })
+                bundle = Bundle(
+                    id=fhir_bundle_id,
+                    type="transaction",
+                    entry=bundle_entries
                 )
-                composition.section[0].entry.append(Reference(reference=f"MedicationStatement/{medication_stmt.id}"))
-                entries.append({
-                    "fullUrl": f"{self.base_url}/MedicationStatement/{medication_stmt.id}",
-                    "resource": medication_stmt.dict()
-                })
-            
-            # 6. CarePlan (treatment plan)
-            if analysis.treatment or analysis.follow_up:
-                care_plan = self._create_care_plan(
-                    analysis.treatment, analysis.follow_up, patient.id, encounter.id
+            else: # Default to DOCUMENT
+                # Create a document bundle
+                composition = self._create_composition(
+                    transcript=transcript,
+                    analysis=analysis,
+                    patient_ref=Reference(reference=f"Patient/{patient.id}"),
+                    practitioner_ref=Reference(reference=f"Practitioner/{practitioner.id}"),
+                    encounter_ref=Reference(reference=f"Encounter/{encounter.id}"),
+                    specialty=specialty,
+                    conversation_type=conversation_type
                 )
-                composition.section[0].entry.append(Reference(reference=f"CarePlan/{care_plan.id}"))
-                entries.append({
-                    "fullUrl": f"{self.base_url}/CarePlan/{care_plan.id}",
-                    "resource": care_plan.dict()
-                })
-            
-            # Assemble bundle
-            bundle.entry = entries
-            
-            logger.info(f"FHIR Bundle created with {len(entries)} resources")
-            
+                
+                # Link clinical resources to the composition
+                if condition: composition.section[0].entry.append(Reference(reference=f"Condition/{condition.id}"))
+                if medication_stmt: composition.section[0].entry.append(Reference(reference=f"MedicationStatement/{medication_stmt.id}"))
+                if care_plan: composition.section[0].entry.append(Reference(reference=f"CarePlan/{care_plan.id}"))
+                
+                # Add composition to the list of main resources
+                resources.insert(0, composition)
+                
+                bundle_entries = [{"fullUrl": f"{self.base_url}/{r.resource_type}/{r.id}", "resource": r.dict()} for r in resources]
+                
+                bundle = Bundle(
+                    id=fhir_bundle_id,
+                    type="document",
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    entry=bundle_entries
+                )
+
+            logger.info(f"FHIR '{bundle.type}' Bundle created with {len(bundle.entry)} resources")
             return bundle.dict()
             
         except Exception as e:

@@ -20,6 +20,11 @@ class OutputFormat(str, Enum):
     FHIR = "fhir"
 
 
+class FHIRBundleType(str, Enum):
+    DOCUMENT = "document"
+    TRANSACTION = "transaction"
+
+
 class ModelName(str, Enum):
     GPT_4_1_NANO = "gpt-4.1-nano"
     GPT_4O_MINI = "gpt-4o-mini"

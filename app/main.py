@@ -19,7 +19,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
-from app.config import settings, OutputFormat, ModelName, STTModel
+from app.config import settings, OutputFormat, ModelName, STTModel, FHIRBundleType
 from app.core.logging import setup_logging, get_logger, audit_logger
 from app.core.security import get_current_user, security_manager, AuthenticationError
 from app.models.responses import (
@@ -217,6 +217,8 @@ async def transcribe_audio(
     specialty: str = "general",
     conversation_type: str = "consultation",
     language: str = "auto",
+    output_language: Optional[str] = None,
+    fhir_bundle_type: Optional[FHIRBundleType] = None,
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
@@ -226,12 +228,21 @@ async def transcribe_audio(
     - **specialty**: Medical specialty
     - **conversation_type**: Type of consultation
     - **output_format**: Output format (json, xml, fhir)
-    - **language**: Language (ISO 639-1 or auto)
+    - **language**: Input language for transcription (ISO 639-1 or auto)
+    - **output_language**: Output language for analysis (ISO 639-1). Defaults to the detected input language.
     - **model**: LLM model for analysis
+    - **fhir_bundle_type**: The type of FHIR bundle to generate ('document' or 'transaction'). Only used when output_format is 'fhir'.
     """
     
     start_time = time.time()
     request_id = request.state.request_id
+    
+    # Validate parameter combination
+    if fhir_bundle_type and output_format != OutputFormat.FHIR:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The 'fhir_bundle_type' parameter is only applicable when 'output_format' is 'fhir'."
+        )
     
     try:
         logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'api_key')}")
@@ -255,13 +266,17 @@ async def transcribe_audio(
             diarization=diarization
         )
         
+        # Set output language to detected language if not provided
+        final_output_language = output_language or transcript.language_detected or "en"
+
         # 3. Analyze transcript with LLM
-        logger.info(f"Request {request_id}: Starting LLM analysis with model: {model}")
+        logger.info(f"Request {request_id}: Starting LLM analysis with model: {model} -> output lang: {final_output_language}")
         analysis = await llm_service.analyze(
             transcript=transcript.full_text,
             model=model,
             specialty=specialty,
-            conversation_type=conversation_type
+            conversation_type=conversation_type,
+            output_language=final_output_language
         )
         
         # 4. Handle different output formats
@@ -275,7 +290,8 @@ async def transcribe_audio(
                 analysis=analysis,
                 request_id=request_id,
                 specialty=specialty,
-                conversation_type=conversation_type
+                conversation_type=conversation_type,
+                bundle_type=fhir_bundle_type or FHIRBundleType.DOCUMENT # Default to document
             )
         elif output_format == OutputFormat.XML:
             xml_content = _create_xml_output(transcript, analysis)
