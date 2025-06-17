@@ -11,7 +11,7 @@ import httpx
 from openai import AsyncOpenAI
 import assemblyai as aai
 from app.config import settings
-from app.models.responses import TranscriptSegment, TranscriptionResult, SpeakerSegment
+from app.models.responses import TranscriptSegment, TranscriptionResult
 from app.core.logging import get_logger, audit_logger
 from app.core.security import DataEncryption
 import io
@@ -36,167 +36,106 @@ class STTService:
         # self.local_whisper_enabled = settings.enable_local_whisper
         # self.whisper_model_path = settings.local_whisper_model_path
     
-    async def transcribe_audio(
+    async def transcribe(
         self,
-        audio_data: bytes,
+        file_path: str,
+        stt_model: str,
         language: str,
-        diarization: bool = False,
-        request_id: str = None
+        diarization: bool = False
     ) -> TranscriptionResult:
         """
-        Haupteinstiegspunkt für Audio-Transkription
-        
-        Args:
-            audio_data: Audio-Daten als Bytes
-            language: Sprache (ISO 639-1 oder "auto")
-            diarization: Sprecher-Diarisierung aktivieren
-            request_id: Request-ID für Logging
+        Main entry point for audio transcription.
+        Selects the STT provider based on the model and parameters.
         """
-        
-        try:
+        logger.info(f"Starting transcription with model: {stt_model}, language: {language}, diarization: {diarization}")
+
+        # Future: Add local whisper logic here
+        # if stt_model == STTModel.LOCAL_WHISPER:
+        #     return await self.transcribe_with_local_whisper(...)
+
+        if stt_model == settings.default_stt_model or "gpt" in stt_model:
             if diarization:
-                # AssemblyAI für Diarisierung verwenden
-                result = await self._transcribe_with_assemblyai(
-                    audio_data, language, request_id
-                )
-            else:
-                # OpenAI für Standard-Transkription
-                result = await self._transcribe_with_openai(
-                    audio_data, language, request_id
-                )
+                logger.warning("Diarization is not supported by the OpenAI STT model. Using AssemblyAI instead.")
+                return await self._transcribe_with_assemblyai(file_path, language)
+            return await self._transcribe_with_openai(file_path, language)
+        
+        elif stt_model == "assemblyai-universal":
+            return await self._transcribe_with_assemblyai(file_path, language, diarization=diarization)
             
-            # Audit-Logging
-            if request_id:
-                audit_logger.log_external_api_call(
-                    request_id=request_id,
-                    service="stt",
-                    endpoint="transcribe",
-                    response_status=200,
-                    response_time_ms=0  # Wird vom Aufrufer gesetzt
-                )
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Transkription fehlgeschlagen: {e}")
-            if request_id:
-                audit_logger.log_error(
-                    request_id=request_id,
-                    error_type="stt_error",
-                    error_message=str(e)
-                )
-            raise
-    
+        else:
+            logger.error(f"Unsupported STT model: {stt_model}")
+            raise ValueError(f"Unsupported STT model: {stt_model}")
+
     async def _transcribe_with_openai(
         self,
-        audio_data: bytes,
-        language: str,
-        request_id: str = None
+        file_path: str,
+        language: str
     ) -> TranscriptionResult:
-        """Transkription mit OpenAI Whisper"""
-        
-        # Temporäre Datei für OpenAI erstellen
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
-            temp_file.write(audio_data)
-            temp_file_path = temp_file.name
-        
+        """Transcription with OpenAI Whisper"""
         try:
-            # OpenAI API aufrufen mit Retry-Logic
             transcript_response = await self._openai_transcribe_with_retry(
-                temp_file_path, language, request_id
+                file_path, language
             )
             
-            # Response verarbeiten
             full_text = transcript_response.text
-            detected_language = getattr(transcript_response, 'language', None)
             
-            # Segment-basierte Antwort erstellen (OpenAI liefert normalerweise nur Text)
             segments = [
-                TranscriptSegment(
-                    text=full_text,
-                    start_time=None,
-                    end_time=None,
-                    speaker=None,
-                    confidence=None
-                )
+                TranscriptSegment(text=full_text)
             ]
             
             result = TranscriptionResult(
                 full_text=full_text,
                 segments=segments,
-                language_detected=detected_language,
-                confidence=None,
-                duration=None
+                language_detected=getattr(transcript_response, 'language', language)
             )
             
-            logger.info(f"OpenAI Transkription erfolgreich: {len(full_text)} Zeichen")
+            logger.info(f"OpenAI transcription successful: {len(full_text)} characters")
             return result
             
-        finally:
-            # Temporäre Datei sicher löschen
-            try:
-                os.unlink(temp_file_path)
-                DataEncryption.secure_delete(audio_data)
-            except:
-                pass
-    
+        except Exception as e:
+            logger.error(f"OpenAI transcription failed: {e}", exc_info=True)
+            raise
+
     async def _transcribe_with_assemblyai(
         self,
-        audio_data: bytes,
+        file_path: str,
         language: str,
-        request_id: str = None
+        diarization: bool = True
     ) -> TranscriptionResult:
-        """Transkription mit AssemblyAI (mit Diarisierung)"""
-        
-        # Temporäre Datei für AssemblyAI erstellen
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
-            temp_file.write(audio_data)
-            temp_file_path = temp_file.name
-        
+        """Transcription with AssemblyAI (with diarization)"""
         try:
-            # AssemblyAI Konfiguration
             config = aai.TranscriptionConfig(
-                speaker_labels=True,  # Diarisierung aktivieren
-                language_code=language if language != "auto" else None,
-                auto_chapters=False,
-                summarization=False,
-                sentiment_analysis=False
+                speaker_labels=diarization,
+                language_code=language if language != "auto" else None
             )
             
-            # AssemblyAI API aufrufen mit Retry-Logic
             transcript = await self._assemblyai_transcribe_with_retry(
-                temp_file_path, config, request_id
+                file_path, config
             )
             
-            # Response verarbeiten
             segments = []
             full_text_parts = []
             
-            if hasattr(transcript, 'utterances') and transcript.utterances:
+            if diarization and hasattr(transcript, 'utterances') and transcript.utterances:
                 for utterance in transcript.utterances:
                     segment = TranscriptSegment(
                         text=utterance.text,
-                        start_time=utterance.start / 1000.0,  # ms zu s
+                        start_time=utterance.start / 1000.0,
                         end_time=utterance.end / 1000.0,
                         speaker=f"Speaker {utterance.speaker}",
                         confidence=utterance.confidence
                     )
                     segments.append(segment)
                     full_text_parts.append(f"[{segment.speaker}] {segment.text}")
+                full_text = "\n".join(full_text_parts)
             else:
-                # Fallback ohne Diarisierung
-                full_text_parts.append(transcript.text)
+                full_text = transcript.text
                 segments.append(
                     TranscriptSegment(
                         text=transcript.text,
-                        start_time=None,
-                        end_time=None,
-                        speaker=None,
                         confidence=transcript.confidence
                     )
                 )
-            
-            full_text = "\n".join(full_text_parts)
             
             result = TranscriptionResult(
                 full_text=full_text,
@@ -206,25 +145,20 @@ class STTService:
                 duration=getattr(transcript, 'audio_duration', None)
             )
             
-            logger.info(f"AssemblyAI Transkription erfolgreich: {len(segments)} Segmente")
+            logger.info(f"AssemblyAI transcription successful: {len(segments)} segments")
             return result
             
-        finally:
-            # Temporäre Datei sicher löschen
-            try:
-                os.unlink(temp_file_path)
-                DataEncryption.secure_delete(audio_data)
-            except:
-                pass
-    
+        except Exception as e:
+            logger.error(f"AssemblyAI transcription failed: {e}", exc_info=True)
+            raise
+
     async def _openai_transcribe_with_retry(
         self,
         file_path: str,
         language: str,
-        request_id: str = None,
         max_retries: int = None
     ):
-        """OpenAI API mit Retry-Logic"""
+        """OpenAI API with Retry-Logic"""
         
         max_retries = max_retries or settings.max_retries
         
@@ -245,17 +179,16 @@ class STTService:
                 
                 # Exponential Backoff
                 wait_time = 2 ** attempt
-                logger.warning(f"OpenAI API Versuch {attempt + 1} fehlgeschlagen, warte {wait_time}s: {e}")
+                logger.warning(f"OpenAI API attempt {attempt + 1} failed, waiting {wait_time}s: {e}")
                 await asyncio.sleep(wait_time)
     
     async def _assemblyai_transcribe_with_retry(
         self,
         file_path: str,
         config: aai.TranscriptionConfig,
-        request_id: str = None,
         max_retries: int = None
     ):
-        """AssemblyAI API mit Retry-Logic"""
+        """AssemblyAI API with Retry-Logic"""
         
         max_retries = max_retries or settings.max_retries
         
@@ -264,9 +197,9 @@ class STTService:
                 transcriber = aai.Transcriber(config=config)
                 transcript = transcriber.transcribe(file_path)
                 
-                # Auf Completion warten
+                # Wait for completion
                 if transcript.status == aai.TranscriptStatus.error:
-                    raise Exception(f"AssemblyAI Fehler: {transcript.error}")
+                    raise Exception(f"AssemblyAI error: {transcript.error}")
                 
                 return transcript
                 
@@ -276,7 +209,7 @@ class STTService:
                 
                 # Exponential Backoff
                 wait_time = 2 ** attempt
-                logger.warning(f"AssemblyAI API Versuch {attempt + 1} fehlgeschlagen, warte {wait_time}s: {e}")
+                logger.warning(f"AssemblyAI API attempt {attempt + 1} failed, waiting {wait_time}s: {e}")
                 await asyncio.sleep(wait_time)
     
     async def transcribe_with_openai(

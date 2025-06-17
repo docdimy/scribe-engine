@@ -79,53 +79,36 @@ class LLMService:
             "sports": "Focus on sports injuries, athletic performance, and exercise-related conditions."
         }
     
-    async def analyze_medical_content(
+    async def analyze(
         self,
         transcript: str,
-        specialty: Optional[str] = None,
-        conversation_type: str = "consultation",
-        model: str = None
+        model: str,
+        specialty: str,
+        conversation_type: str
     ) -> AnalysisResult:
         """
-        Analyze medical transcript content using LLM
-        
-        Args:
-            transcript: The medical conversation transcript
-            specialty: Medical specialty context
-            conversation_type: Type of medical conversation
-            model: LLM model to use (defaults to gpt-4.1-nano)
-            
-        Returns:
-            AnalysisResult with structured medical analysis
+        Analyze medical transcript content using an LLM.
         """
-        
-        if not model:
-            model = self.default_model
-        
         try:
-            # Generate medical analysis prompt
             prompt = self._generate_medical_prompt(
                 transcript, specialty, conversation_type
             )
             
             logger.info(f"Starting LLM analysis with model: {model}")
             
-            # Call OpenAI API with retry logic
-            response = await self._call_openai_with_retry(
+            response_content = await self._call_openai_with_retry(
                 prompt=prompt,
                 model=model,
-                max_retries=3
+                max_retries=settings.max_retries
             )
             
-            # Parse structured response
-            analysis = self._parse_medical_analysis(response)
+            analysis = self._parse_medical_analysis(response_content)
             
-            logger.info(f"LLM analysis completed successfully")
-            
+            logger.info("LLM analysis completed successfully.")
             return analysis
             
         except Exception as e:
-            logger.error(f"LLM analysis failed: {e}")
+            logger.error(f"LLM analysis failed: {e}", exc_info=True)
             raise
     
     def _generate_medical_prompt(
@@ -158,26 +141,20 @@ TRANSCRIPT:
 
 Please provide your analysis in the following JSON format:
 {{
-    "summary": "Brief clinical summary (2-3 sentences)",
-    "chief_complaint": "Primary reason for visit/concern",
-    "diagnosis": "Clinical assessment/diagnosis (if determinable)",
-    "symptoms": ["list", "of", "symptoms", "mentioned"],
-    "treatment": "Treatment plan/recommendations",
-    "medication": "Medications mentioned or prescribed",
-    "follow_up": "Follow-up care instructions",
-    "risk_factors": ["identified", "risk", "factors"],
-    "clinical_notes": "Additional clinical observations",
-    "confidence_level": "high/medium/low based on clarity of information"
+    "summary": "Brief clinical summary of the conversation (2-3 sentences).",
+    "diagnosis": "Most likely clinical diagnosis or differential diagnoses. Be conservative if information is unclear.",
+    "treatment": "Recommended treatment plan or actions taken.",
+    "medication": "Medications mentioned, prescribed, or adjusted.",
+    "follow_up": "Instructions for follow-up care or appointments.",
+    "specialty_notes": "Key observations and notes relevant to the specified medical specialty.",
+    "icd10_codes": ["ICD-10-CM code(s) relevant to the diagnosis, if identifiable."]
 }}
 
 Guidelines:
-- Be conservative in diagnosis unless clearly stated
-- Use medical terminology appropriately
-- Note if information is incomplete or unclear
-- Focus on clinically relevant information
-- Maintain patient confidentiality principles
-
-Provide ONLY the JSON response, no additional text."""
+- If a field is not applicable or information is missing, use an empty string or an empty list.
+- Provide ONLY the JSON response, with no additional text or explanations.
+- The analysis should be objective and based solely on the provided transcript.
+"""
         
         return prompt
     
@@ -223,73 +200,36 @@ Provide ONLY the JSON response, no additional text."""
         """Parse and validate LLM response into structured format"""
         
         try:
-            # Parse JSON response
+            if not response_content:
+                logger.warning("LLM response was empty. Returning empty analysis.")
+                return AnalysisResult(summary="No analysis available.")
+
             analysis_data = json.loads(response_content)
             
-            # Validate and extract fields with defaults
-            summary = analysis_data.get("summary", "Analysis not available")
-            chief_complaint = analysis_data.get("chief_complaint")
-            diagnosis = analysis_data.get("diagnosis")
-            symptoms = analysis_data.get("symptoms", [])
-            treatment = analysis_data.get("treatment")
-            medication = analysis_data.get("medication")
-            follow_up = analysis_data.get("follow_up")
-            risk_factors = analysis_data.get("risk_factors", [])
-            clinical_notes = analysis_data.get("clinical_notes")
-            confidence_level = analysis_data.get("confidence_level", "medium")
-            
-            # Ensure lists are properly formatted
-            if isinstance(symptoms, str):
-                symptoms = [symptoms]
-            if isinstance(risk_factors, str):
-                risk_factors = [risk_factors]
-            
+            # Use .get() with default values to prevent KeyErrors
             return AnalysisResult(
-                summary=summary,
-                chief_complaint=chief_complaint,
-                diagnosis=diagnosis,
-                symptoms=symptoms,
-                treatment=treatment,
-                medication=medication,
-                follow_up=follow_up,
-                risk_factors=risk_factors,
-                clinical_notes=clinical_notes,
-                confidence_level=confidence_level
+                summary=analysis_data.get("summary", "Summary not available."),
+                diagnosis=analysis_data.get("diagnosis"),
+                treatment=analysis_data.get("treatment"),
+                medication=analysis_data.get("medication"),
+                follow_up=analysis_data.get("follow_up"),
+                specialty_notes=analysis_data.get("specialty_notes"),
+                icd10_codes=analysis_data.get("icd10_codes", [])
             )
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            logger.error(f"Response content: {response_content}")
-            
-            # Fallback: extract information using regex
-            return self._fallback_parse(response_content)
         
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON from LLM response.", exc_info=True)
+            # Try a fallback if JSON is malformed but contains content
+            return self._fallback_parse(response_content)
         except Exception as e:
-            logger.error(f"Error parsing medical analysis: {e}")
-            
-            # Return minimal analysis
-            return AnalysisResult(
-                summary="Analysis parsing failed",
-                symptoms=[],
-                risk_factors=[],
-                confidence_level="low"
-            )
+            logger.error(f"Error parsing LLM analysis: {e}", exc_info=True)
+            raise
     
     def _fallback_parse(self, content: str) -> AnalysisResult:
-        """Fallback parsing when JSON parsing fails"""
-        
-        # Try to extract basic information using regex patterns
-        summary_match = re.search(r'"summary":\s*"([^"]*)"', content)
-        diagnosis_match = re.search(r'"diagnosis":\s*"([^"]*)"', content)
-        treatment_match = re.search(r'"treatment":\s*"([^"]*)"', content)
-        
+        """A simple fallback parser if JSON is invalid."""
         return AnalysisResult(
-            summary=summary_match.group(1) if summary_match else "Summary extraction failed",
-            diagnosis=diagnosis_match.group(1) if diagnosis_match else None,
-            treatment=treatment_match.group(1) if treatment_match else None,
-            symptoms=[],
-            risk_factors=[],
-            confidence_level="low"
+            summary="Could not parse structured analysis from the model.",
+            specialty_notes=content # Put the raw response here for debugging
         )
     
     async def get_available_models(self) -> Dict[str, Any]:
