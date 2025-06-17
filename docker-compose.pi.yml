@@ -15,7 +15,7 @@ services:
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
       - API_SECRET_KEY=${API_SECRET_KEY}
       # Raspberry Pi optimizations
-      - MAX_AUDIO_DURATION=600  # Kürzere Verarbeitung
+      - MAX_AUDIO_DURATION=300  # Kürzere Verarbeitung
       - LLM_MAX_TOKENS=1000     # Weniger Tokens für ARM
       - RATE_LIMIT_REQUESTS=5   # Weniger Requests
     depends_on:

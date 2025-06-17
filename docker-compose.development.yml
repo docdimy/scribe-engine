@@ -2,18 +2,21 @@ version: '3.8'
 
 services:
   scribe-engine:
-    # Verwendet Image aus privater Registry
-    image: localhost:5000/scribe-engine:latest
+    image: ghcr.io/docdimy/scribe-engine:latest
     container_name: scribe-engine-api
     ports:
       - "3001:3001"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=INFO
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
       - API_SECRET_KEY=${API_SECRET_KEY}
+      - RATE_LIMIT_REQUESTS=10
+      - MAX_AUDIO_DURATION=600
+      - LLM_MAX_TOKENS=2000
+      - MAX_FILE_SIZE_MB=50
     depends_on:
       - redis
     volumes:
