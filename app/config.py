@@ -3,7 +3,8 @@ Central configuration for the Scribe Engine Service
 """
 
 from typing import List, Optional
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from enum import Enum
 
 
