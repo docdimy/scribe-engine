@@ -217,7 +217,8 @@ async def transcribe_audio(
     diarization: bool = False,
     specialty: str = "general",
     conversation_type: str = "consultation",
-    language: str = "auto"
+    language: str = "auto",
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
     Transcribe and analyze audio data
@@ -237,11 +238,9 @@ async def transcribe_audio(
     try:
         logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'api_key')}")
         
-        # Parameters are now validated by FastAPI using Enums
-        
-        # Process audio file
+        # 1. Process audio file
         with audio_processing_duration.time():
-            processed_audio_path, duration, file_metadata = await audio_processor.process_and_save_audio(
+            processed_audio_path, duration, _ = await audio_processor.process_and_save_audio(
                 file=audio_file, 
                 max_duration=settings.max_audio_duration, 
                 max_size_mb=settings.max_file_size_mb,
@@ -250,17 +249,17 @@ async def transcribe_audio(
         
         logger.info(f"Request {request_id}: Audio processed in {time.time() - start_time:.2f}s. Duration: {duration:.2f}s")
         
-        # Perform STT
+        # 2. Transcribe audio
+        logger.info(f"Starting transcription with model: {stt_model}, language: {language}, diarization: {diarization}")
         transcript = await stt_service.transcribe(
             file_path=processed_audio_path,
-            stt_model=stt_model,
             language=language,
-            diarization=diarization
+            diarization=diarization,
+            model=stt_model
         )
         
-        logger.info(f"Request {request_id}: STT completed. Language: {transcript.language_detected}")
-        
-        # Perform LLM analysis
+        # 3. Analyze transcript with LLM
+        logger.info(f"Request {request_id}: Starting LLM analysis with model: {model}")
         analysis = await llm_service.analyze(
             transcript=transcript.full_text,
             model=model,
@@ -268,39 +267,38 @@ async def transcribe_audio(
             conversation_type=conversation_type
         )
         
-        logger.info(f"Request {request_id}: LLM analysis completed.")
+        # 4. Handle different output formats
+        fhir_bundle = None
+        xml_content = None
         
-        # Generate final response based on output format
-        processing_time_ms = int((time.time() - start_time) * 1000)
-        
-        response_data = {
-            "request_id": request_id,
-            "timestamp": datetime.utcnow(),
-            "transcript": transcript,
-            "analysis": analysis,
-            "output_format": output_format,
-            "processing_time_ms": processing_time_ms
-        }
-        
-        # Handle different output formats
         if output_format == OutputFormat.FHIR:
+            logger.info(f"Request {request_id}: Generating FHIR bundle")
             fhir_bundle = await fhir_service.create_fhir_bundle(
                 transcript=transcript,
                 analysis=analysis,
-                patient_id="example-patient-id" # Placeholder
+                request_id=request_id,
+                specialty=specialty,
+                conversation_type=conversation_type
             )
-            response_data["fhir_bundle"] = fhir_bundle
-            
         elif output_format == OutputFormat.XML:
             xml_content = _create_xml_output(transcript, analysis)
-            # For simplicity, returning it in the JSON payload. 
-            # Could also return a pure XML response.
-            response_data["xml_content"] = xml_content
             
-        # Clean up temporary file
-        audio_processor.cleanup(processed_audio_path)
+        # 5. Clean up temporary file
+        background_tasks.add_task(audio_processor.cleanup_temp_file, processed_audio_path)
         
-        return ScribeResponse(**response_data)
+        # 6. Create final response
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        
+        return ScribeResponse(
+            request_id=request_id,
+            timestamp=datetime.utcnow(),
+            transcript=transcript,
+            analysis=analysis,
+            output_format=output_format,
+            processing_time_ms=processing_time_ms,
+            fhir_bundle=fhir_bundle,
+            xml_content=xml_content,
+        )
 
     except AuthenticationError as e:
         logger.warning(f"Request {request_id} failed authentication: {e}")
