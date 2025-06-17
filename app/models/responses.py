@@ -40,8 +40,8 @@ class AnalysisResult(BaseModel):
     icd10_codes: Optional[List[str]] = Field(description="Relevante ICD-10 Codes")
     
     
-class TranscribeResponse(BaseModel):
-    """Hauptantwort für Transkriptions-Requests"""
+class ScribeResponse(BaseModel):
+    """Hauptantwort für Transkriptions- und Analyse-Requests"""
     request_id: str = Field(description="Eindeutige Request-ID")
     timestamp: datetime = Field(description="Verarbeitungszeitpunkt")
     transcript: TranscriptionResult = Field(description="Transkriptionsergebnis")

@@ -22,9 +22,8 @@ from starlette.responses import Response
 from app.config import settings, OutputFormat, ModelName, STTModel
 from app.core.logging import setup_logging, get_logger, audit_logger
 from app.core.security import get_current_user, security_manager, AuthenticationError
-from app.models.requests import TranscribeRequest, validate_query_parameters
 from app.models.responses import (
-    TranscribeResponse, HealthCheckResponse, ErrorResponse, 
+    ScribeResponse, HealthCheckResponse, ErrorResponse, 
     RateLimitResponse, TranscriptionResult, AnalysisResult
 )
 from app.services.audio_processor import AudioProcessor
@@ -196,7 +195,7 @@ async def metrics():
 # Main endpoint for audio transcription
 @app.post(
     "/v1/transcribe",
-    response_model=TranscriptionResponse,
+    response_model=ScribeResponse,
     responses={
         400: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
@@ -209,15 +208,17 @@ async def metrics():
 @limiter.limit(f"{settings.rate_limit_requests}/minute")
 async def transcribe_audio(
     request: Request,
-    background_tasks: BackgroundTasks,
     audio_file: UploadFile = File(...),
+    user_info: dict = Depends(get_current_user),
+    # Use Enums for automatic validation
+    output_format: OutputFormat = OutputFormat.JSON,
+    model: ModelName = ModelName.GPT_4_1_NANO,
+    stt_model: STTModel = STTModel.GPT_4O_MINI_TRANSCRIBE,
+    # Optional parameters with validation
     diarization: bool = False,
     specialty: str = "general",
     conversation_type: str = "consultation",
-    output_format: OutputFormat = OutputFormat.JSON,
-    language: str = "auto",
-    model: str = "gpt-4.1-nano",
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    language: str = "auto"
 ):
     """
     Transcribe and analyze audio data
@@ -228,155 +229,100 @@ async def transcribe_audio(
     - **output_format**: Output format (json, xml, fhir)
     - **language**: Language (ISO 639-1 or auto)
     - **model**: LLM model for analysis
+    - **stt_model**: STT model for transcription
     """
     
     start_time = time.time()
     request_id = request.state.request_id
     
     try:
-        # Authenticate user
-        user_info = await get_current_user(credentials)
-        logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'unknown')}")
+        logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'api_key')}")
         
-        # Validate query parameters
-        validated_params = validate_query_parameters(
-            diarization=diarization,
-            specialty=specialty,
-            conversation_type=conversation_type,
-            output_format=output_format,
-            language=language,
-            model=model
-        )
+        # Parameters are now validated by FastAPI using Enums
         
         # Process audio file
-        logger.info(f"Processing audio file for request {request_id}")
-        
-        # Validate audio file
-        audio_data = await audio_processor.validate_audio_file(audio_file)
-        
-        # Extract metadata
-        metadata = await audio_processor.extract_metadata(audio_data)
-        logger.info(f"Audio metadata: {metadata}")
-        
-        # Speech-to-text
-        logger.info(f"Starting STT for request {request_id}")
-        start_time = time.time()
-        
-        if validated_params.diarization:
-            # Use AssemblyAI for diarization
-            transcript_result = await stt_service.transcribe_with_assemblyai(
-                audio_data=audio_data,
-                language=validated_params.language,
-                diarization=True
-            )
-        else:
-            # Use OpenAI Whisper (default)
-            transcript_result = await stt_service.transcribe_with_openai(
-                audio_data=audio_data,
-                language=validated_params.language
+        with audio_processing_duration.time():
+            processed_audio_path, duration, file_metadata = await audio_processor.process_audio(
+                file=audio_file, 
+                max_duration=settings.max_audio_duration, 
+                max_size_mb=settings.max_file_size_mb,
+                supported_types=settings.supported_audio_types
             )
         
-        stt_duration = time.time() - start_time
-        logger.info(f"STT completed in {stt_duration:.2f}s for request {request_id}")
+        logger.info(f"Request {request_id}: Audio processed in {time.time() - start_time:.2f}s. Duration: {duration:.2f}s")
         
-        # Medical analysis with LLM
-        logger.info(f"Starting LLM analysis for request {request_id}")
-        start_time = time.time()
-        
-        analysis_result = await llm_service.analyze_medical_content(
-            transcript=transcript_result.full_text,
-            specialty=validated_params.specialty,
-            conversation_type=validated_params.conversation_type,
-            model=validated_params.model
+        # Perform STT
+        transcript = await stt_service.transcribe(
+            file_path=processed_audio_path,
+            stt_model=stt_model,
+            language=language,
+            diarization=diarization
         )
         
-        llm_duration = time.time() - start_time
-        logger.info(f"LLM analysis completed in {llm_duration:.2f}s for request {request_id}")
+        logger.info(f"Request {request_id}: STT completed. Language: {transcript.language_detected}")
         
-        # Format output based on requested format
-        if validated_params.output_format == OutputFormat.FHIR:
-            # Generate FHIR Bundle
-            fhir_data = await fhir_service.create_fhir_bundle(
-                transcript=transcript_result,
-                analysis=analysis_result,
-                request_id=request_id,
-                specialty=validated_params.specialty,
-                conversation_type=validated_params.conversation_type
+        # Perform LLM analysis
+        analysis = await llm_service.analyze(
+            transcript=transcript.full_text,
+            model=model,
+            specialty=specialty,
+            conversation_type=conversation_type
+        )
+        
+        logger.info(f"Request {request_id}: LLM analysis completed.")
+        
+        # Generate final response based on output format
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        
+        response_data = {
+            "request_id": request_id,
+            "timestamp": datetime.utcnow(),
+            "transcript": transcript,
+            "analysis": analysis,
+            "output_format": output_format,
+            "processing_time_ms": processing_time_ms
+        }
+        
+        # Handle different output formats
+        if output_format == OutputFormat.FHIR:
+            fhir_bundle = await fhir_service.create_fhir_bundle(
+                transcript=transcript,
+                analysis=analysis,
+                patient_id="example-patient-id" # Placeholder
             )
+            response_data["fhir_bundle"] = fhir_bundle
             
-            response_data = {
-                "request_id": request_id,
-                "format": "fhir",
-                "data": fhir_data
-            }
-        else:
-            # Standard JSON/XML response
-            response_data = {
-                "request_id": request_id,
-                "transcript": transcript_result.dict(),
-                "analysis": analysis_result.dict(),
-                "metadata": {
-                    "processing_time": stt_duration + llm_duration,
-                    "specialty": validated_params.specialty,
-                    "conversation_type": validated_params.conversation_type,
-                    "diarization_used": validated_params.diarization,
-                    "model_used": validated_params.model,
-                    "language": validated_params.language,
-                    "audio_metadata": metadata
-                }
-            }
+        elif output_format == OutputFormat.XML:
+            xml_content = _create_xml_output(transcript, analysis)
+            # For simplicity, returning it in the JSON payload. 
+            # Could also return a pure XML response.
+            response_data["xml_content"] = xml_content
+            
+        # Clean up temporary file
+        audio_processor.cleanup(processed_audio_path)
         
-        # Log completion for audit trail
-        background_tasks.add_task(
-            log_request,
-            request_id=request_id,
-            method=request.method,
-            url=str(request.url),
-            status_code=200,
-            duration=stt_duration + llm_duration,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=get_remote_address(request),
-            user_id=user_info.get("sub"),
-            additional_data={
-                "audio_duration": metadata.get("duration"),
-                "transcript_length": len(transcript_result.full_text),
-                "specialty": validated_params.specialty
-            }
-        )
-        
-        logger.info(f"Request {request_id} completed successfully")
-        
-        return TranscriptionResponse(**response_data)
-        
+        return ScribeResponse(**response_data)
+
     except AuthenticationError as e:
-        logger.warning(f"Authentication failed for request {request_id}: {e}")
+        logger.warning(f"Request {request_id} failed authentication: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    except ValueError as e:
-        logger.warning(f"Validation error for request {request_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions from services (e.g., audio validation)
+        raise
+        
     except Exception as e:
-        logger.error(f"Unexpected error for request {request_id}: {e}")
-        
-        # Log error for audit trail
-        background_tasks.add_task(
-            log_error,
-            request_id=request_id,
-            error=str(e),
-            method=request.method,
-            url=str(request.url)
-        )
-        
+        logger.error(f"Request {request_id} failed with an unexpected error: {e}", exc_info=True)
+        # Clean up in case of failure
+        if 'processed_audio_path' in locals() and processed_audio_path:
+            audio_processor.cleanup(processed_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error occurred"
+            detail="An internal server error occurred during transcription."
         )
 
 
