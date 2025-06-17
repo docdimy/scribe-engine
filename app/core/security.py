@@ -18,6 +18,11 @@ security_scheme = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+class AuthenticationError(Exception):
+    """Custom exception for authentication failures."""
+    pass
+
+
 class SecurityManager:
     """Zentrale Sicherheitsverwaltung"""
     
