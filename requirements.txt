@@ -16,6 +16,7 @@ passlib[bcrypt]
 # Monitoring & Rate Limiting
 prometheus-client
 slowapi
+structlog
 
 # Audio Processing
 mutagen

@@ -4,13 +4,13 @@ A scalable FastAPI-based microservice for processing audio data, STT integration
 
 ## ✨ Features
 
-- **🎙️ Audio Transcription** with OpenAI Whisper and AssemblyAI
-- **🗣️ Speaker Diarization** for multi-person conversations
-- **🤖 LLM Analysis** of medical consultations
-- **🔗 FHIR R4 Integration** for standards-compliant outputs
+- **🎙️ Audio Transcription** with OpenAI (`gpt-4o-mini-transcribe`) and AssemblyAI (`assemblyai-universal`)
+- **🗣️ Automatic STT Backend Selection** based on diarization requirement
+- **🤖 Multi-lingual LLM Analysis** with selectable input and output languages
+- **🔗 Flexible FHIR R4 Integration** with selectable bundle types (`document` or `transaction`)
 - **🔐 Security** with API-Key/JWT authentication
 - **📊 Monitoring** with Prometheus metrics
-- **🌍 Multi-language** (DE, EN, FR, ES, IT, PT, NL, SV, DA, NO, FI)
+- **🌍 Multi-language Support** for transcription and analysis
 - **⚡ Rate Limiting** for API protection
 - **📋 Audit Logging** for compliance
 
@@ -18,11 +18,11 @@ A scalable FastAPI-based microservice for processing audio data, STT integration
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend PWA  │───▶│  Scribe Engine  │───▶│ External APIs   │
-│                 │    │                 │    │                 │
-│ • Upload Audio  │    │ • Validation    │    │ • OpenAI        │
-│ • View Results  │    │ • Transcription │    │ • AssemblyAI    │
-│ • Export FHIR   │    │ • Analysis      │    │                 │
+│   Client App    │───▶│  Scribe Engine  │───▶│ External APIs   │
+│ (PWA, EMR, ...) │    │                 │    │                 │
+│                 │    │ • Validation    │    │ • OpenAI        │
+│                 │    │ • Transcription │    │ • AssemblyAI    │
+│                 │    │ • Analysis      │    │                 │
 └─────────────────┘    │ • FHIR Export   │    └─────────────────┘
                        │                 │
                        │ • Security      │    ┌─────────────────┐
@@ -39,7 +39,7 @@ A scalable FastAPI-based microservice for processing audio data, STT integration
 
 - Docker & Docker Compose
 - OpenAI API Key
-- AssemblyAI API Key
+- AssemblyAI API Key (only if diarization is needed)
 
 ### 1. Clone Repository
 
@@ -50,7 +50,7 @@ cd scribe-engine
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file in the root directory and add your API keys. This file is loaded automatically in development.
+Create a `.env` file in the root directory and add your API keys.
 
 ```bash
 # .env
@@ -59,12 +59,18 @@ OPENAI_API_KEY="sk-..."
 ASSEMBLYAI_API_KEY="..."
 ```
 
-### 3. Start with Docker Compose
+### 3. Build and Start with Docker Compose
 
 For development, use the `docker-compose.development.yml` file.
 
 ```bash
+# Use --build the first time or after changing requirements.txt
 docker-compose -f docker-compose.development.yml up --build -d
+```
+
+To stop the service:
+```bash
+docker-compose -f docker-compose.development.yml down
 ```
 
 ### 4. Test API
@@ -82,166 +88,94 @@ A successful response should look like this:
 
 ## 📋 API Documentation
 
-### Endpoints
+### Main Endpoint: `POST /v1/transcribe`
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/v1/transcribe` | Audio transcription and analysis |
-| `GET` | `/health` | Health check |
-| `GET` | `/ready` | Readiness check |
-| `GET` | `/metrics` | Prometheus metrics |
-| `GET` | `/docs` | OpenAPI documentation (development only) |
+This is the primary endpoint for all transcription and analysis tasks. It accepts a `multipart/form-data` request containing the audio file and uses query parameters for configuration.
 
-### Main Endpoint: `/v1/transcribe`
+#### Query Parameters
 
-This endpoint accepts a multipart/form-data request.
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `audio_file` | file | **Required** | The audio file to be processed. |
+| `output_format` | enum | `json` | Desired output format. Can be `json`, `xml`, or `fhir`. |
+| `diarization` | bool | `false` | If `true`, enables speaker separation. This automatically uses AssemblyAI as the STT backend. |
+| `language` | string | `auto` | ISO 639-1 code for the **input** audio language. `auto` enables automatic detection. |
+| `output_language` | string | detected language | ISO 639-1 code for the **output** analysis language. Defaults to the detected input language. |
+| `model` | enum | `gpt-4.1-nano` | The LLM to use for analysis. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
+| `specialty` | string | `general` | Medical specialty to tailor the analysis (e.g., `cardiology`). |
+| `fhir_bundle_type` | enum | `document` | The type of FHIR bundle to generate. Can be `document` or `transaction`. **Only used if `output_format=fhir`**. |
+| `conversation_type`| string | `consultation` | The type of conversation for better contextual analysis. |
 
-**Query Parameters:**
-- `diarization` (bool, optional): Enable speaker diarization. Defaults to `false`. Requires `stt_model=assemblyai-universal`.
-- `specialty` (string, optional): Medical specialty for analysis (e.g., `cardiology`). Defaults to `general`.
-- `conversation_type` (string, optional): Type of conversation (e.g., `consultation`, `discharge`). Defaults to `consultation`.
-- `output_format` (enum, optional): Desired output format. Defaults to `json`.
-  - Allowed values: `json`, `xml`, `fhir`.
-- `language` (string, optional): Language of the audio (ISO 639-1 code). Defaults to `auto`.
-- `model` (enum, optional): LLM model for the analysis part. Defaults to `gpt-4.1-nano`.
-  - Allowed values: `gpt-4.1-nano`, `gpt-4o-mini`, `gpt-4o`.
+---
 
-**Form Data:**
-- `audio_file` (file, required): The audio file to be processed.
+#### Request Examples
 
-**Request Example:**
+##### Example 1: Simple JSON Analysis (German)
+
+Transcribe a German audio file and get the analysis back in German.
+
 ```bash
-curl -X POST "http://localhost:3001/v1/transcribe?specialty=cardiology&output_format=fhir" \
+curl -X POST "http://localhost:3001/v1/transcribe?language=de" \
   -H "Authorization: Bearer your-api-key" \
-  -F "audio_file=@/path/to/your/consultation.mp3"
+  -F "audio_file=@/path/to/your/german_audio.mp3"
 ```
 
-**Response (`ScribeResponse`):**
-```json
-{
-  "request_id": "bf2b1e2a-...",
-  "timestamp": "2024-07-29T14:45:10.123Z",
-  "transcript": {
-    "full_text": "Patient reports experiencing chest pain after light exercise...",
-    "segments": [
-      {
-        "text": "Patient reports experiencing chest pain after light exercise...",
-        "start_time": 0.5,
-        "end_time": 5.2,
-        "speaker": null,
-        "confidence": 0.96
-      }
-    ],
-    "language_detected": "en",
-    "confidence": 0.96,
-    "duration": 124.5
-  },
-  "analysis": {
-    "summary": "The patient, a 58-year-old male, presents with exertional chest pain, suggesting potential cardiac issues.",
-    "diagnosis": "Suspected Stable Angina Pectoris",
-    "treatment": "Recommend an ECG and a stress test. Prescribed sublingual nitroglycerin for symptomatic relief.",
-    "medication": "Aspirin 81mg daily, Nitroglycerin PRN for chest pain.",
-    "follow_up": "Follow-up appointment in one week to review test results.",
-    "specialty_notes": "Key cardiac risk factors include a history of smoking and hypertension. ECG is crucial to rule out acute myocardial infarction.",
-    "icd10_codes": [
-      "I20.9"
-    ]
-  },
-  "output_format": "fhir",
-  "processing_time_ms": 18432,
-  "fhir_bundle": {
-    "resourceType": "Bundle",
-    "id": "bf2b1e2a-...",
-    "type": "document",
-    "timestamp": "...",
-    "entry": "[...]"
-  },
-  "xml_content": null
-}
+##### Example 2: FHIR Document for Cardiology (English Output)
+
+Transcribe a German audio file but generate an English analysis and a FHIR `document` bundle for a cardiology context.
+
+```bash
+curl -X POST "http://localhost:3001/v1/transcribe?language=de&output_language=en&output_format=fhir&specialty=cardiology" \
+  -H "Authorization: Bearer your-api-key" \
+  -F "audio_file=@/path/to/your/german_audio.mp3"
 ```
 
-## 🔧 Configuration
+##### Example 3: FHIR Transaction with Diarization
 
-### Environment Variables
+Transcribe an audio file with multiple speakers, generating a FHIR `transaction` bundle ready to be posted to an EMR/KIS.
 
-```env
-# API Configuration
-API_SECRET_KEY=your-secret-key
-OPENAI_API_KEY=your-openai-key
-ASSEMBLYAI_API_KEY=your-assemblyai-key
-
-# Audio Processing
-MAX_AUDIO_DURATION=600
-MAX_FILE_SIZE_MB=50
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS=10
-RATE_LIMIT_WINDOW=60
-
-# CORS for PWA
-CORS_ORIGINS=https://your-pwa-domain.com
+```bash
+curl -X POST "http://localhost:3001/v1/transcribe?diarization=true&output_format=fhir&fhir_bundle_type=transaction" \
+  -H "Authorization: Bearer your-api-key" \
+  -F "audio_file=@/path/to/your/multi-speaker-audio.mp3"
 ```
+---
+
+## 🏥 FHIR R4 Integration
+
+The service can generate fully FHIR R4-compliant bundles. Depending on the `fhir_bundle_type` parameter, the structure serves different purposes.
+
+### `document` Bundle (Default)
+- **Type:** `document`
+- **Purpose:** Creates a static, unchangeable clinical document, much like a PDF. Ideal for archiving or sharing a snapshot in time.
+- **Structure:** The bundle is centered around a `Composition` resource that acts as a table of contents, linking to all other resources.
+
+### `transaction` Bundle
+- **Type:** `transaction`
+- **Purpose:** Creates a set of instructions for a FHIR server. It's an "atomic" operation: either all resources are created successfully, or none are. Ideal for writing data into an EMR or clinical data repository.
+- **Structure:** The bundle contains a list of resources, each with a `request` field (`POST`, `PUT`) telling the receiving server what to do.
+
+**Generated Resources:**
+- **Composition** (only in `document` bundles)
+- **Patient** (anonymized placeholder)
+- **Practitioner** (anonymized placeholder)
+- **Encounter**
+- **Condition** (from analysis)
+- **MedicationStatement** (from analysis)
+- **CarePlan** (from analysis)
+
+## 🔧 Configuration Details
 
 ### Supported Audio Formats
 
 - MP3 (`audio/mpeg`)
 - WAV (`audio/wav`)
-- MP4/M4A (`audio/mp4`, `audio/m4a`)
+- MP4/M4A (`audio/mp4`)
 - OGG (`audio/ogg`)
 
 ### Languages
 
-- German (de)
-- English (en)
-- French (fr)
-- Spanish (es)
-- Italian (it)
-- Portuguese (pt)
-- Dutch (nl)
-- Swedish (sv)
-- Danish (da)
-- Norwegian (no)
-- Finnish (fi)
-- Auto-detection (auto)
-
-## 🏥 FHIR R4 Integration
-
-The service generates fully FHIR R4-compliant bundles with:
-
-- **Composition**: Main consultation document
-- **Patient**: Anonymized patient resource
-- **Practitioner**: Anonymized physician resource
-- **Encounter**: Consultation event
-- **Media**: Audio transcript
-- **Condition**: Diagnoses
-- **MedicationStatement**: Medications
-- **CarePlan**: Treatment plan
-
-### FHIR Bundle Example
-
-```json
-{
-  "resourceType": "Bundle",
-  "type": "document",
-  "entry": [
-    {
-      "resource": {
-        "resourceType": "Composition",
-        "status": "final",
-        "type": {
-          "coding": [{
-            "system": "http://loinc.org",
-            "code": "11488-4",
-            "display": "Consultation note"
-          }]
-        },
-        ...
-      }
-    },
-    ...
-  ]
-}
-```
+Supports all languages provided by the backend services. For explicit use, provide the ISO 639-1 code (e.g., `de`, `en`, `es`).
 
 ## 🔒 Security
 
