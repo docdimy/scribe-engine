@@ -2,8 +2,8 @@ version: '3.8'
 
 services:
   scribe-engine:
-    # Verwendet fertiges Image von GitHub statt lokaler Build
-    image: ghcr.io/YOUR_GITHUB_USERNAME/scribe-engine:latest
+    # GitHub Container Registry (erfordert öffentliches Package)
+    image: ghcr.io/docdimy/scribe-engine:latest
     container_name: scribe-engine-api
     ports:
       - "3001:3001"
@@ -16,8 +16,6 @@ services:
       - API_SECRET_KEY=${API_SECRET_KEY}
     depends_on:
       - redis
-    volumes:
-      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
@@ -25,6 +23,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   redis:
     container_name: scribe-engine-redis
@@ -35,15 +39,11 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-
-  prometheus:
-    container_name: scribe-engine-prometheus
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   redis_data: 
