@@ -284,34 +284,32 @@ class FHIRService:
         
         return Condition(
             id=str(uuid.uuid4()),
-            clinicalStatus=CodeableConcept(
-                coding=[Coding(
-                    system="http://terminology.hl7.org/CodeSystem/condition-clinical",
-                    code="active"
-                )]
-            ),
-            verificationStatus=CodeableConcept(
-                coding=[Coding(
-                    system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
-                    code="provisional"
-                )]
-            ),
+            clinicalStatus=CodeableConcept(coding=[Coding(
+                system="http://terminology.hl7.org/CodeSystem/condition-clinical",
+                code="active"
+            )]),
+            verificationStatus=CodeableConcept(coding=[Coding(
+                system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                code="provisional" # Based on LLM analysis
+            )]),
+            category=[CodeableConcept(coding=[Coding(
+                system="http://terminology.hl7.org/CodeSystem/condition-category",
+                code="encounter-diagnosis"
+            )])],
             code=CodeableConcept(text=diagnosis),
             subject=Reference(reference=f"Patient/{patient_id}"),
-            encounter=Reference(reference=f"Encounter/{encounter_id}"),
-            recordedDate=datetime.utcnow().isoformat() + "Z"
+            encounter=Reference(reference=f"Encounter/{encounter_id}")
         )
     
     def _create_medication_statement(self, medication: str, patient_id: str, encounter_id: str) -> MedicationStatement:
         """Create a MedicationStatement resource"""
-        
         return MedicationStatement(
             id=str(uuid.uuid4()),
-            status="recorded",
+            status="active",
             medicationCodeableConcept=CodeableConcept(text=medication),
             subject=Reference(reference=f"Patient/{patient_id}"),
             context=Reference(reference=f"Encounter/{encounter_id}"),
-            effectiveDateTime=datetime.utcnow().isoformat() + "Z"
+            dateAsserted=datetime.utcnow().isoformat() + "Z"
         )
     
     def _create_care_plan(
