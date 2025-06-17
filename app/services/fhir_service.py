@@ -5,12 +5,20 @@ FHIR R4 Service for medical data conversion
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
-
-from fhir.resources import (
-    Bundle, Composition, Patient, Practitioner, Encounter, Observation,
-    Condition, MedicationStatement, CarePlan, Media, CodeableConcept,
-    Coding, Reference, Narrative
-)
+from fhir.resources.bundle import Bundle
+from fhir.resources.composition import Composition
+from fhir.resources.patient import Patient
+from fhir.resources.practitioner import Practitioner
+from fhir.resources.encounter import Encounter
+from fhir.resources.observation import Observation
+from fhir.resources.condition import Condition
+from fhir.resources.medicationstatement import MedicationStatement
+from fhir.resources.careplan import CarePlan
+from fhir.resources.media import Media
+from fhir.resources.codeableconcept import CodeableConcept
+from fhir.resources.coding import Coding
+from fhir.resources.reference import Reference
+from fhir.resources.narrative import Narrative
 
 from app.models.responses import TranscriptionResult, AnalysisResult
 from app.core.logging import get_logger

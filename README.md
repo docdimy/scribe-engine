@@ -50,28 +50,34 @@ cd scribe-engine
 
 ### 2. Configure Environment Variables
 
+Create a `.env` file in the root directory and add your API keys. This file is loaded automatically in development.
+
 ```bash
-cp .env.example .env
-# Edit .env and set your API keys
+# .env
+API_SECRET_KEY="your-super-secret-key-for-jwt-and-authentication"
+OPENAI_API_KEY="sk-..."
+ASSEMBLYAI_API_KEY="..."
 ```
 
 ### 3. Start with Docker Compose
 
+For development, use the `docker-compose.development.yml` file.
+
 ```bash
-docker-compose up -d
+docker-compose -f docker-compose.development.yml up --build -d
 ```
 
 ### 4. Test API
 
-```bash
-# Health Check
-curl http://localhost:3001/health
+Check if the service is running:
 
-# Audio Transcription (Example)
-curl -X POST "http://localhost:3001/v1/transcribe" \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: audio/mpeg" \
-  --data-binary @sample-audio.mp3
+```bash
+curl http://localhost:3001/health
+```
+
+A successful response should look like this:
+```json
+{"status":"healthy","timestamp":"...","version":"1.0.0","uptime_seconds":...}
 ```
 
 ## 📋 API Documentation
@@ -88,44 +94,71 @@ curl -X POST "http://localhost:3001/v1/transcribe" \
 
 ### Main Endpoint: `/v1/transcribe`
 
-**Parameters:**
-- `diarization` (bool): Enable speaker diarization
-- `specialty` (string): Medical specialty
-- `conversation_type` (string): Type of consultation
-- `output_format` (enum): json/xml/fhir
-- `language` (string): ISO 639-1 code or "auto"
-- `model` (enum): LLM model for analysis
+This endpoint accepts a multipart/form-data request.
 
-**Request:**
+**Query Parameters:**
+- `diarization` (bool, optional): Enable speaker diarization. Defaults to `false`. Requires `stt_model=assemblyai-universal`.
+- `specialty` (string, optional): Medical specialty for analysis (e.g., `cardiology`). Defaults to `general`.
+- `conversation_type` (string, optional): Type of conversation (e.g., `consultation`, `discharge`). Defaults to `consultation`.
+- `output_format` (enum, optional): Desired output format. Defaults to `json`.
+  - Allowed values: `json`, `xml`, `fhir`.
+- `language` (string, optional): Language of the audio (ISO 639-1 code). Defaults to `auto`.
+- `model` (enum, optional): LLM model for the analysis part. Defaults to `gpt-4.1-nano`.
+  - Allowed values: `gpt-4.1-nano`, `gpt-4o-mini`, `gpt-4o`.
+- `stt_model` (enum, optional): STT model for transcription. Defaults to `gpt-4o-mini-transcribe`.
+  - Allowed values: `gpt-4o-mini-transcribe`, `assemblyai-universal`.
+
+**Form Data:**
+- `audio_file` (file, required): The audio file to be processed.
+
+**Request Example:**
 ```bash
-curl -X POST "http://localhost:3001/v1/transcribe?diarization=true&specialty=cardiology&output_format=fhir" \
+curl -X POST "http://localhost:3001/v1/transcribe?specialty=cardiology&output_format=fhir" \
   -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: audio/mpeg" \
-  --data-binary @consultation.mp3
+  -F "audio_file=@/path/to/your/consultation.mp3"
 ```
 
-**Response:**
+**Response (`ScribeResponse`):**
 ```json
 {
-  "request_id": "abc123",
-  "timestamp": "2024-01-15T10:30:00Z",
+  "request_id": "bf2b1e2a-...",
+  "timestamp": "2024-07-29T14:45:10.123Z",
   "transcript": {
-    "full_text": "Patient describes chest pain...",
-    "segments": [...],
+    "full_text": "Patient reports experiencing chest pain after light exercise...",
+    "segments": [
+      {
+        "text": "Patient reports experiencing chest pain after light exercise...",
+        "start_time": 0.5,
+        "end_time": 5.2,
+        "speaker": null,
+        "confidence": 0.96
+      }
+    ],
     "language_detected": "en",
-    "confidence": 0.95,
-    "duration": 180.5
+    "confidence": 0.96,
+    "duration": 124.5
   },
   "analysis": {
-    "summary": "Patient with acute chest pain...",
-    "diagnosis": "Suspected angina pectoris",
-    "treatment": "Rest, sublingual nitro",
-    "medication": "Aspirin 100mg daily",
-    "follow_up": "Check-up in 1 week",
-    "icd10_codes": ["I20.9"]
+    "summary": "The patient, a 58-year-old male, presents with exertional chest pain, suggesting potential cardiac issues.",
+    "diagnosis": "Suspected Stable Angina Pectoris",
+    "treatment": "Recommend an ECG and a stress test. Prescribed sublingual nitroglycerin for symptomatic relief.",
+    "medication": "Aspirin 81mg daily, Nitroglycerin PRN for chest pain.",
+    "follow_up": "Follow-up appointment in one week to review test results.",
+    "specialty_notes": "Key cardiac risk factors include a history of smoking and hypertension. ECG is crucial to rule out acute myocardial infarction.",
+    "icd10_codes": [
+      "I20.9"
+    ]
   },
-  "fhir_bundle": {...},
-  "processing_time_ms": 1500
+  "output_format": "fhir",
+  "processing_time_ms": 18432,
+  "fhir_bundle": {
+    "resourceType": "Bundle",
+    "id": "bf2b1e2a-...",
+    "type": "document",
+    "timestamp": "...",
+    "entry": "[...]"
+  },
+  "xml_content": null
 }
 ```
 
