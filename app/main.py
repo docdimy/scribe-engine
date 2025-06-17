@@ -30,7 +30,6 @@ from app.services.audio_processor import AudioProcessor
 from app.services.stt_service import STTService
 from app.services.llm_service import LLMService
 from app.services.fhir_service import FHIRService
-from app.core import metrics
 
 # Initialize logging
 setup_logging()
@@ -334,7 +333,6 @@ def _create_xml_output(transcript: TranscriptionResult, analysis: AnalysisResult
     <transcript>
         <full_text><![CDATA[{transcript.full_text}]]></full_text>
         <language>{transcript.language_detected or 'unknown'}</language>
-        <duration>{transcript.duration or 0}</duration>
         <confidence>{transcript.confidence or 0}</confidence>
         <segments>
             {"".join([
