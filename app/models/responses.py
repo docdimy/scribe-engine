@@ -11,10 +11,10 @@ from app.config import OutputFormat
 class TranscriptSegment(BaseModel):
     """Einzelnes Transkript-Segment mit optionaler Sprecher-Info"""
     text: str = Field(description="Transkribierter Text")
-    start_time: Optional[float] = Field(description="Startzeit in Sekunden")
-    end_time: Optional[float] = Field(description="Endzeit in Sekunden")
-    speaker: Optional[str] = Field(description="Sprecher-ID (nur bei Diarisierung)")
-    confidence: Optional[float] = Field(description="Konfidenz-Score (0.0-1.0)")
+    start_time: Optional[float] = Field(default=None, description="Startzeit in Sekunden")
+    end_time: Optional[float] = Field(default=None, description="Endzeit in Sekunden")
+    speaker: Optional[str] = Field(default=None, description="Sprecher-ID (nur bei Diarisierung)")
+    confidence: Optional[float] = Field(default=None, description="Konfidenz-Score (0.0-1.0)")
 
 
 class TranscriptionResult(BaseModel):
