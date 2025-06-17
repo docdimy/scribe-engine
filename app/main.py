@@ -212,7 +212,6 @@ async def transcribe_audio(
     # Use Enums for automatic validation
     output_format: OutputFormat = OutputFormat.JSON,
     model: ModelName = ModelName.GPT_4_1_NANO,
-    stt_model: STTModel = STTModel.GPT_4O_MINI_TRANSCRIBE,
     # Optional parameters with validation
     diarization: bool = False,
     specialty: str = "general",
@@ -229,7 +228,6 @@ async def transcribe_audio(
     - **output_format**: Output format (json, xml, fhir)
     - **language**: Language (ISO 639-1 or auto)
     - **model**: LLM model for analysis
-    - **stt_model**: STT model for transcription
     """
     
     start_time = time.time()
@@ -250,12 +248,11 @@ async def transcribe_audio(
         logger.info(f"Request {request_id}: Audio processed in {time.time() - start_time:.2f}s. Duration: {duration:.2f}s")
         
         # 2. Transcribe audio
-        logger.info(f"Starting transcription with model: {stt_model}, language: {language}, diarization: {diarization}")
+        logger.info(f"Starting transcription, language: {language}, diarization: {diarization}")
         transcript = await stt_service.transcribe(
             file_path=processed_audio_path,
             language=language,
-            diarization=diarization,
-            stt_model=stt_model
+            diarization=diarization
         )
         
         # 3. Analyze transcript with LLM

@@ -23,6 +23,8 @@ from fhir.resources.R4B.narrative import Narrative
 from app.models.responses import TranscriptionResult, AnalysisResult
 from app.core.logging import get_logger
 from app.config import settings
+import base64
+import mimetypes
 
 logger = get_logger(__name__)
 
@@ -68,66 +70,69 @@ class FHIRService:
             
             entries = []
             
-            # 1. Composition (main document)
-            composition = self._create_composition(
-                transcript, analysis, request_id, specialty, conversation_type
-            )
-            entries.append({
-                "fullUrl": f"{self.base_url}/Composition/{composition.id}",
-                "resource": composition.dict()
-            })
-            
-            # 2. Patient (placeholder)
+            # 1. Patient (placeholder)
             patient = self._create_patient_placeholder()
             entries.append({
                 "fullUrl": f"{self.base_url}/Patient/{patient.id}",
                 "resource": patient.dict()
             })
             
-            # 3. Practitioner (placeholder)
+            # 2. Practitioner (placeholder)
             practitioner = self._create_practitioner_placeholder(specialty)
             entries.append({
                 "fullUrl": f"{self.base_url}/Practitioner/{practitioner.id}",
                 "resource": practitioner.dict()
             })
             
-            # 4. Encounter (consultation)
+            # 3. Encounter (consultation)
             encounter = self._create_encounter(conversation_type, patient.id, practitioner.id)
             entries.append({
                 "fullUrl": f"{self.base_url}/Encounter/{encounter.id}",
                 "resource": encounter.dict()
             })
             
-            # 5. Media (audio transcript)
-            media = self._create_media_resource(transcript, encounter.id)
-            entries.append({
-                "fullUrl": f"{self.base_url}/Media/{media.id}",
-                "resource": media.dict()
+            # Link resources in Composition
+            composition = self._create_composition(
+                transcript=transcript, 
+                analysis=analysis,
+                patient_ref=Reference(reference=f"Patient/{patient.id}"),
+                practitioner_ref=Reference(reference=f"Practitioner/{practitioner.id}"),
+                encounter_ref=Reference(reference=f"Encounter/{encounter.id}"),
+                specialty=specialty, 
+                conversation_type=conversation_type
+            )
+            # Add Composition as the first entry
+            entries.insert(0, {
+                "fullUrl": f"{self.base_url}/Composition/{composition.id}",
+                "resource": composition.dict()
             })
             
-            # 6. Condition (diagnosis)
+            # 4. Condition (diagnosis)
             if analysis.diagnosis:
                 condition = self._create_condition(analysis.diagnosis, patient.id, encounter.id)
+                composition.section[0].entry.append(Reference(reference=f"Condition/{condition.id}"))
                 entries.append({
                     "fullUrl": f"{self.base_url}/Condition/{condition.id}",
                     "resource": condition.dict()
                 })
             
-            # 7. MedicationStatement (medication)
+            # 5. MedicationStatement (medication)
             if analysis.medication:
                 medication_stmt = self._create_medication_statement(
                     analysis.medication, patient.id, encounter.id
                 )
+                composition.section[0].entry.append(Reference(reference=f"MedicationStatement/{medication_stmt.id}"))
                 entries.append({
                     "fullUrl": f"{self.base_url}/MedicationStatement/{medication_stmt.id}",
                     "resource": medication_stmt.dict()
                 })
             
-            # 8. CarePlan (treatment plan)
+            # 6. CarePlan (treatment plan)
             if analysis.treatment or analysis.follow_up:
                 care_plan = self._create_care_plan(
                     analysis.treatment, analysis.follow_up, patient.id, encounter.id
                 )
+                composition.section[0].entry.append(Reference(reference=f"CarePlan/{care_plan.id}"))
                 entries.append({
                     "fullUrl": f"{self.base_url}/CarePlan/{care_plan.id}",
                     "resource": care_plan.dict()
@@ -135,21 +140,22 @@ class FHIRService:
             
             # Assemble bundle
             bundle.entry = entries
-            bundle.total = len(entries)
             
             logger.info(f"FHIR Bundle created with {len(entries)} resources")
             
             return bundle.dict()
             
         except Exception as e:
-            logger.error(f"FHIR Bundle creation failed: {e}")
+            logger.error(f"FHIR Bundle creation failed: {e}", exc_info=True)
             raise
     
     def _create_composition(
         self,
         transcript: TranscriptionResult,
         analysis: AnalysisResult,
-        request_id: str,
+        patient_ref: Reference,
+        practitioner_ref: Reference,
+        encounter_ref: Reference,
         specialty: Optional[str],
         conversation_type: str
     ) -> Composition:
@@ -158,7 +164,9 @@ class FHIRService:
         # Create narrative HTML
         narrative_text = f"""
         <div xmlns="http://www.w3.org/1999/xhtml">
-            <h1>Medical Consultation</h1>
+            <h1>Medical Consultation: {conversation_type.title()}</h1>
+            <p><strong>Specialty:</strong> {specialty or 'N/A'}</p>
+            <hr/>
             <h2>Summary</h2>
             <p>{analysis.summary}</p>
             
@@ -167,9 +175,8 @@ class FHIRService:
             {f'<h2>Medication</h2><p>{analysis.medication}</p>' if analysis.medication else ''}
             {f'<h2>Follow-up</h2><p>{analysis.follow_up}</p>' if analysis.follow_up else ''}
             
-            <h2>Transcript</h2>
-            <p><em>Duration: {transcript.duration or 'Unknown'} seconds</em></p>
-            <p><em>Language: {transcript.language_detected or 'Unknown'}</em></p>
+            <h2>Full Transcript</h2>
+            <p><em>(Duration: {transcript.duration or 'Unknown'}s, Language: {transcript.language_detected or 'Unknown'})</em></p>
             <pre>{transcript.full_text}</pre>
         </div>
         """
@@ -184,14 +191,19 @@ class FHIRService:
                     display="Consultation note"
                 )]
             ),
-            subject=Reference(reference="Patient/patient-placeholder"),
+            subject=patient_ref,
+            encounter=encounter_ref,
             date=datetime.utcnow().isoformat() + "Z",
-            author=[Reference(reference="Practitioner/practitioner-placeholder")],
+            author=[practitioner_ref],
             title=f"Medical Consultation - {conversation_type.title()}",
             text=Narrative(
                 status="generated",
                 div=narrative_text
-            )
+            ),
+            section=[{
+                "title": "Clinical Findings and Plan",
+                "entry": []
+            }]
         )
     
     def _create_patient_placeholder(self) -> Patient:
@@ -253,31 +265,6 @@ class FHIRService:
         }
         
         return Encounter(**encounter_data)
-    
-    def _create_media_resource(self, transcript: TranscriptionResult, encounter_id: str) -> Media:
-        """Create a Media resource for the transcript"""
-        
-        return Media(
-            id=str(uuid.uuid4()),
-            status="completed",
-            type=CodeableConcept(
-                coding=[Coding(
-                    system="http://terminology.hl7.org/CodeSystem/media-type",
-                    code="audio",
-                    display="Audio"
-                )]
-            ),
-            subject=Reference(reference="Patient/patient-placeholder"),
-            encounter=Reference(reference=f"Encounter/{encounter_id}"),
-            content={
-                "contentType": "text/plain",
-                "data": transcript.full_text.encode('utf-8').hex(),
-                "title": "Audio Transcript"
-            },
-            note=[{
-                "text": f"Automatically generated transcript. Language: {transcript.language_detected or 'Unknown'}"
-            }]
-        )
     
     def _create_condition(self, diagnosis: str, patient_id: str, encounter_id: str) -> Condition:
         """Create a Condition resource for the diagnosis"""

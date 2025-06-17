@@ -39,32 +39,21 @@ class STTService:
     async def transcribe(
         self,
         file_path: str,
-        stt_model: str,
         language: str,
         diarization: bool = False
     ) -> TranscriptionResult:
         """
         Main entry point for audio transcription.
-        Selects the STT provider based on the model and parameters.
+        Selects the STT provider based on the diarization parameter.
         """
-        logger.info(f"Starting transcription with model: {stt_model}, language: {language}, diarization: {diarization}")
+        logger.info(f"Starting transcription. Language: {language}, Diarization: {diarization}")
 
-        # Future: Add local whisper logic here
-        # if stt_model == STTModel.LOCAL_WHISPER:
-        #     return await self.transcribe_with_local_whisper(...)
-
-        if stt_model == settings.default_stt_model or "gpt" in stt_model:
-            if diarization:
-                logger.warning("Diarization is not supported by the OpenAI STT model. Using AssemblyAI instead.")
-                return await self._transcribe_with_assemblyai(file_path, language)
-            return await self._transcribe_with_openai(file_path, language)
-        
-        elif stt_model == "assemblyai-universal":
-            return await self._transcribe_with_assemblyai(file_path, language, diarization=diarization)
-            
+        if diarization:
+            logger.info("Diarization requested, using AssemblyAI.")
+            return await self._transcribe_with_assemblyai(file_path, language, diarization=True)
         else:
-            logger.error(f"Unsupported STT model: {stt_model}")
-            raise ValueError(f"Unsupported STT model: {stt_model}")
+            logger.info("No diarization, using OpenAI.")
+            return await self._transcribe_with_openai(file_path, language)
 
     async def _transcribe_with_openai(
         self,

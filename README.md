@@ -105,8 +105,6 @@ This endpoint accepts a multipart/form-data request.
 - `language` (string, optional): Language of the audio (ISO 639-1 code). Defaults to `auto`.
 - `model` (enum, optional): LLM model for the analysis part. Defaults to `gpt-4.1-nano`.
   - Allowed values: `gpt-4.1-nano`, `gpt-4o-mini`, `gpt-4o`.
-- `stt_model` (enum, optional): STT model for transcription. Defaults to `gpt-4o-mini-transcribe`.
-  - Allowed values: `gpt-4o-mini-transcribe`, `assemblyai-universal`.
 
 **Form Data:**
 - `audio_file` (file, required): The audio file to be processed.
