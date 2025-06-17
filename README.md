@@ -29,8 +29,8 @@ A scalable FastAPI-based microservice for processing audio data, STT integration
                        │ • Monitoring    │───▶│ Infrastructure  │
                        │ • Logging       │    │                 │
                        └─────────────────┘    │ • Redis         │
-                                             │ • Prometheus    │
-                                             └─────────────────┘
+                                              │ • Prometheus    │
+                                              └─────────────────┘
 ```
 
 ## 🚀 Quick Start

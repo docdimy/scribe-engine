@@ -194,18 +194,29 @@ async def metrics():
 
 
 # Main endpoint for audio transcription
-@app.post("/v1/transcribe", response_model=TranscribeResponse)
-@limiter.limit(f"{settings.rate_limit_requests}/{settings.rate_limit_window}second")
+@app.post(
+    "/v1/transcribe",
+    response_model=TranscriptionResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        500: {"model": ErrorResponse}
+    }
+)
+@limiter.limit(f"{settings.rate_limit_requests}/minute")
 async def transcribe_audio(
     request: Request,
     background_tasks: BackgroundTasks,
     audio_file: UploadFile = File(...),
     diarization: bool = False,
-    specialty: Optional[str] = None,
+    specialty: str = "general",
     conversation_type: str = "consultation",
     output_format: OutputFormat = OutputFormat.JSON,
     language: str = "auto",
-    model: ModelName = ModelName.CURRENT,
+    model: str = "gpt-4.1-nano",
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """
