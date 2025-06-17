@@ -392,13 +392,13 @@ def _create_xml_output(transcript: TranscriptionResult, analysis: AnalysisResult
         <confidence>{transcript.confidence or 0}</confidence>
         <segments>
             {"".join([
-                f"""<segment>
-                    <text><![CDATA[{seg.text}]]></text>
-                    <start_time>{seg.start_time or 0}</start_time>
-                    <end_time>{seg.end_time or 0}</end_time>
-                    <speaker>{seg.speaker or 'unknown'}</speaker>
-                    <confidence>{seg.confidence or 0}</confidence>
-                </segment>"""
+                f"<segment>"
+                f"<text><![CDATA[{seg.text}]]></text>"
+                f"<start_time>{seg.start_time or 0}</start_time>"
+                f"<end_time>{seg.end_time or 0}</end_time>"
+                f"<speaker>{seg.speaker or 'unknown'}</speaker>"
+                f"<confidence>{seg.confidence or 0}</confidence>"
+                f"</segment>"
                 for seg in transcript.segments
             ])}
         </segments>
