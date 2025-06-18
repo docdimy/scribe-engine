@@ -1,4 +1,7 @@
-# 🏥 Scribe Engine - Medical Audio Transcription & Analysis
+<p align="center">
+  <img src="app/static/scribe-engine.svg" alt="Scribe Engine Logo" width="200">
+</p>
+<h1 align="center">Medical Audio Transcription & Analysis</h1>
 
 A scalable FastAPI-based microservice for processing audio data, STT integration and LLM-based medical analysis with FHIR R4 compliance.
 
