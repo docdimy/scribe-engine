@@ -6,7 +6,9 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
+import asyncio
+import httpx
 
 from fastapi import FastAPI, HTTPException, Request, Depends, status, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,6 +54,34 @@ fhir_service = FHIRService()
 
 # Security
 security = HTTPBearer()
+
+
+# --- Dependency Status Checks ---
+async def check_openai_status() -> (str, str):
+    """Checks the status of the OpenAI API."""
+    try:
+        client = httpx.AsyncClient()
+        response = await client.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {settings.openai_api_key}"})
+        if response.status_code == 200:
+            return "ok", "OpenAI API is reachable."
+        return "error", f"OpenAI API returned status {response.status_code}."
+    except Exception as e:
+        return "error", f"Failed to connect to OpenAI API: {e}"
+
+async def check_assemblyai_status() -> (str, str):
+    """Checks the status of the AssemblyAI API."""
+    try:
+        client = httpx.AsyncClient()
+        headers = {"authorization": settings.assemblyai_api_key}
+        # Using a simple endpoint like /v2/transcript with a limit of 1 to check connectivity
+        response = await client.get("https://api.assemblyai.com/v2/transcript?limit=1", headers=headers)
+        if 200 <= response.status_code < 300:
+            return "ok", "AssemblyAI API is reachable."
+        return "error", f"AssemblyAI API returned status {response.status_code}."
+    except Exception as e:
+        return "error", f"Failed to connect to AssemblyAI API: {e}"
+
+# --------------------------------
 
 
 @asynccontextmanager
@@ -165,24 +195,38 @@ async def health_check():
     )
 
 
-@app.get("/ready", response_model=HealthCheckResponse)
-async def readiness_check():
-    """Service readiness check"""
-    
-    # TODO: Check external dependencies (OpenAI, AssemblyAI, Redis)
-    details = {
-        "openai": "connected",
-        "assemblyai": "connected", 
-        "redis": "connected"
+@app.get("/ready")
+async def readiness_check(request: Request):
+    """
+    Checks if the service and its dependencies are ready to accept traffic.
+    Returns 200 OK if all checks pass, otherwise 503 Service Unavailable.
+    """
+    checks = {
+        "openai": check_openai_status(),
+        "assemblyai": check_assemblyai_status(),
     }
     
-    return HealthCheckResponse(
-        status="ready",
-        timestamp=datetime.utcnow(),
-        version=settings.api_version,
-        uptime_seconds=int(time.time()),
-        details=details
-    )
+    results = await asyncio.gather(*checks.values())
+    
+    details = {}
+    all_ok = True
+    for (name, (status, message)) in zip(checks.keys(), results):
+        details[name] = {"status": status, "message": message}
+        if status != "ok":
+            all_ok = False
+            
+    response_data = {
+        "status": "ready" if all_ok else "unavailable",
+        "timestamp": datetime.utcnow(),
+        "version": settings.api_version,
+        "details": details
+    }
+    
+    if all_ok:
+        return JSONResponse(status_code=status.HTTP_200_OK, content=response_data)
+    else:
+        logger.warning(f"Readiness check failed: {details}")
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=response_data)
 
 
 # Serve main page

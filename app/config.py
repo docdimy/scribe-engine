@@ -61,10 +61,6 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
     assemblyai_api_key: str = Field(..., env="ASSEMBLYAI_API_KEY")
     
-    # Redis Configuration
-    redis_url: str = Field(default="redis://localhost:6379")
-    redis_ttl: int = Field(default=3600)  # 1 hour
-    
     # Rate Limiting
     rate_limit_requests: int = Field(default=10)
     rate_limit_window: int = Field(default=60)  # seconds

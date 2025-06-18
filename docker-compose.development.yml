@@ -2,32 +2,18 @@ version: '3.8'
 
 services:
   scribe-engine:
-    image: ghcr.io/docdimy/scribe-engine:latest
-    container_name: scribe-engine-api
+    container_name: scribe-engine-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "3001:3001"
-    environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=INFO
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
-      - API_SECRET_KEY=${API_SECRET_KEY}
-      - RATE_LIMIT_REQUESTS=10
-      - MAX_AUDIO_DURATION=600
-      - LLM_MAX_TOKENS=2000
-      - MAX_FILE_SIZE_MB=50
-    depends_on:
-      - redis
     volumes:
-      - ./logs:/app/logs
+      - .:/app
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3001", "--reload"]
+    env_file:
+      - .env
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   redis:
     container_name: scribe-engine-redis
@@ -47,6 +33,3 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
-
-volumes:
-  redis_data: 

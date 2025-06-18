@@ -2,26 +2,15 @@ version: '3.8'
 
 services:
   scribe-engine:
-    build: 
+    image: dietmarw/scribe-engine:latest
+    container_name: scribe-engine-pi
+    build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
-    environment:
-      - ENVIRONMENT=production
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=INFO
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
-      - API_SECRET_KEY=${API_SECRET_KEY}
-      # Raspberry Pi optimizations
-      - MAX_AUDIO_DURATION=300  # Kürzere Verarbeitung
-      - LLM_MAX_TOKENS=1000     # Weniger Tokens für ARM
-      - RATE_LIMIT_REQUESTS=5   # Weniger Requests
-    depends_on:
-      - redis
-    volumes:
-      - ./logs:/app/logs
+    env_file:
+      - .env.production
     restart: unless-stopped
     # ARM64 resource limits
     deploy:
@@ -33,40 +22,16 @@ services:
           memory: 1G
           cpus: '1.0'
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    # ARM64 resource limits
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.5'
-
   # Lightweight monitoring für Raspberry Pi
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.37.0
+    container_name: scribe-engine-prometheus
     ports:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=24h'  # Weniger Speicher
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
+      - '--storage.tsdb.retention.time=1d' # 1 day retention
+    restart: unless-stopped
 
-volumes:
-  redis_data: 
