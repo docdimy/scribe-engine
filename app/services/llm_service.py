@@ -7,8 +7,23 @@ from typing import Dict, Any
 from app.config import settings, ModelName
 from app.models.responses import AnalysisResult
 from app.core.logging import get_logger
+import httpx
+from openai.types.chat import ChatCompletion
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = get_logger(__name__)
+
+# Define which exceptions should trigger a retry
+retryable_exceptions = (
+    httpx.TimeoutException,
+    # Add other transient exceptions if needed
+)
+
+# Define retry condition for OpenAI server errors (5xx)
+def is_server_error(exception):
+    """Return True if the exception is an OpenAI 5xx error"""
+    from openai import APIStatusError
+    return isinstance(exception, APIStatusError) and exception.status_code >= 500
 
 class LLMService:
     """Service for analyzing medical transcripts using LLMs."""
@@ -19,7 +34,13 @@ class LLMService:
         self.openai_client = instructor.patch(AsyncOpenAI(api_key=settings.openai_api_key))
         self.temperature = settings.llm_temperature
         self.max_tokens = settings.llm_max_tokens
+        self.default_model = settings.default_llm_model
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(3),
+        retry=(retry_if_exception_type(retryable_exceptions) | retry_if_exception_type(is_server_error))
+    )
     async def analyze(
         self,
         transcript: str,
@@ -95,6 +116,6 @@ Your analysis should include:
         # This is a placeholder; in a real-world scenario, you might
         # query the OpenAI API or have a more dynamic way of getting models.
         return {
-            "default": settings.default_llm_model,
+            "default": self.default_model,
             "supported": [model.value for model in ModelName]
         } 

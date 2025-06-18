@@ -16,8 +16,22 @@ from app.core.logging import get_logger, audit_logger
 from app.core.security import DataEncryption
 import io
 import json
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = get_logger(__name__)
+
+# Define which exceptions should trigger a retry
+retryable_exceptions = (
+    httpx.TimeoutException,
+    aai.errors.AssemblyAIError, # General AssemblyAI errors
+    # Add other transient exceptions if needed
+)
+
+# Define retry condition for OpenAI server errors (5xx)
+def is_openai_server_error(exception):
+    """Return True if the exception is an OpenAI 5xx error"""
+    from openai import APIStatusError
+    return isinstance(exception, APIStatusError) and exception.status_code >= 500
 
 
 class STTService:
@@ -55,6 +69,11 @@ class STTService:
             logger.info("No diarization, using OpenAI.")
             return await self._transcribe_with_openai(file_path, language)
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(3),
+        retry=(retry_if_exception_type(retryable_exceptions) | retry_if_exception_type(is_openai_server_error))
+    )
     async def _transcribe_with_openai(
         self,
         file_path: str,
@@ -85,6 +104,11 @@ class STTService:
             logger.error(f"OpenAI transcription failed: {e}", exc_info=True)
             raise
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type(retryable_exceptions)
+    )
     async def _transcribe_with_assemblyai(
         self,
         file_path: str,
