@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scribe Engine Test</title>
+    <link rel="icon" href="/static/scribe-engine.svg" type="image/svg+xml">
     <style>
         :root {
             --primary-color: #007bff;
@@ -112,7 +113,7 @@
 </head>
 <body>
     <header class="header">
-        <img src="scribe-engine.svg" alt="Logo" class="logo">
+        <img src="/static/scribe-engine.svg" alt="Logo" class="logo">
         <h1>Web Test</h1>
     </header>
     <div class="container">
@@ -135,26 +136,45 @@
             
             <div class="options">
                 <h2>Optionen</h2>
-                <label for="apiKey">API Key</label>
-                <input type="text" id="apiKey" value="test_api_key">
-                
-                <label for="outputFormat">Ausgabeformat</label>
-                <select id="outputFormat">
-                    <option value="json">JSON</option>
-                    <option value="fhir">FHIR</option>
-                    <option value="xml">XML</option>
-                </select>
-
-                <label for="model">LLM Model</label>
-                <select id="model">
-                    <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-                    <option value="gpt-4o">gpt-4o</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                </select>
+                <div class="options-grid">
+                    <div>
+                        <label for="apiKey">API Key</label>
+                        <input type="text" id="apiKey" value="test_api_key">
+                    </div>
+                    <div>
+                        <label for="model">LLM Model</label>
+                        <select id="model">
+                            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="language">Input Language</label>
+                        <input type="text" id="language" placeholder="auto">
+                    </div>
+                    <div>
+                        <label for="outputLanguage">Output Language</label>
+                        <input type="text" id="outputLanguage" placeholder="Defaults to input language">
+                    </div>
+                    <div>
+                        <label for="outputFormat">Ausgabeformat</label>
+                        <select id="outputFormat">
+                            <option value="json">JSON</option>
+                            <option value="fhir">FHIR</option>
+                            <option value="xml">XML</option>
+                        </select>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="diarization">
+                        <label for="diarization">Enable Diarization</label>
+                    </div>
+                </div>
             </div>
 
             <h2>Ergebnis</h2>
             <pre id="result">Noch kein Ergebnis.</pre>
+            <button id="copyButton" class="copy-btn">Copy JSON</button>
         </div>
     </div>
 
