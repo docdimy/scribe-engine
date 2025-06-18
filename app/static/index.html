@@ -121,34 +121,41 @@
             Nehmen Sie Audio direkt im Browser auf und senden Sie es zur Transkription und Analyse an die Scribe Engine API.
         </p>
 
-        <div class="controls">
-            <button id="recordButton">Aufnahme starten</button>
-            <button id="stopButton" disabled>Aufnahme stoppen</button>
-            <div id="status">Bereit zum Aufnehmen</div>
+        <div id="micWarning" class="warning" style="display: none;">
+            <strong>Mikrofonzugriff eingeschränkt:</strong><br>
+            Für Audioaufnahmen rufen Sie diese Seite bitte über <code>http://localhost</code> oder eine sichere <code>https://</code> Verbindung auf. Browser blockieren den Mikrofonzugriff auf unsicheren Nicht-Localhost-Domains.
         </div>
         
-        <div class="options">
-            <h2>Optionen</h2>
-            <label for="apiKey">API Key</label>
-            <input type="text" id="apiKey" value="test_api_key">
+        <div class="content">
+            <div class="controls">
+                <button id="recordButton">Aufnahme starten</button>
+                <button id="stopButton" disabled>Aufnahme stoppen</button>
+                <div id="status">Bereit zum Aufnehmen</div>
+            </div>
             
-            <label for="outputFormat">Ausgabeformat</label>
-            <select id="outputFormat">
-                <option value="json">JSON</option>
-                <option value="fhir">FHIR</option>
-                <option value="xml">XML</option>
-            </select>
+            <div class="options">
+                <h2>Optionen</h2>
+                <label for="apiKey">API Key</label>
+                <input type="text" id="apiKey" value="test_api_key">
+                
+                <label for="outputFormat">Ausgabeformat</label>
+                <select id="outputFormat">
+                    <option value="json">JSON</option>
+                    <option value="fhir">FHIR</option>
+                    <option value="xml">XML</option>
+                </select>
 
-            <label for="model">LLM Model</label>
-            <select id="model">
-                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-                <option value="gpt-4o">gpt-4o</option>
-                <option value="gpt-4o-mini">gpt-4o-mini</option>
-            </select>
+                <label for="model">LLM Model</label>
+                <select id="model">
+                    <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                </select>
+            </div>
+
+            <h2>Ergebnis</h2>
+            <pre id="result">Noch kein Ergebnis.</pre>
         </div>
-
-        <h2>Ergebnis</h2>
-        <pre id="result">Noch kein Ergebnis.</pre>
     </div>
 
     <script>
@@ -163,10 +170,17 @@
         const languageInput = document.getElementById('language');
         const outputLangInput = document.getElementById('outputLanguage');
         const outputFormatSelect = document.getElementById('outputFormat');
-        const modelSelect = document.getElementById('model');
+        const micWarningDiv = document.getElementById('micWarning');
 
         let mediaRecorder;
         let audioChunks = [];
+
+        // Check for secure context for microphone access
+        if (!navigator.mediaDevices || !window.isSecureContext) {
+            recordButton.disabled = true;
+            micWarningDiv.style.display = 'block';
+            statusDiv.textContent = 'Mikrofon nicht verfügbar.';
+        }
 
         recordButton.addEventListener('click', async () => {
             try {
@@ -190,37 +204,38 @@
 
             } catch (err) {
                 console.error('Fehler beim Zugriff auf das Mikrofon:', err);
-                statusDiv.textContent = 'Fehler: Mikrofonzugriff verweigert.';
+                statusDiv.textContent = 'Fehler: Mikrofonzugriff verweigert. Bitte Berechtigung erteilen.';
+                micWarningDiv.style.display = 'block';
             }
         });
 
         stopButton.addEventListener('click', () => {
-            mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Mikrofon freigeben
-            
-            mediaRecorder.addEventListener('stop', async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                audioChunks = [];
-
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Mikrofon freigeben
                 recordButton.disabled = false;
                 stopButton.disabled = true;
-                statusDiv.textContent = 'Aufnahme gestoppt. Sende Daten...';
-
-                await sendData(audioBlob);
-            });
+            }
         });
 
         async function sendData(audioBlob) {
             const formData = new FormData();
             formData.append('audio_file', audioBlob, 'recording.webm');
             
-            const apiKey = apiKeyInput.value;
-            const outputFormat = outputFormatSelect.value;
-            const model = modelSelect.value;
+            // Use relative URL to avoid CORS issues and work on any server IP
+            const apiUrl = new URL('/v1/transcribe', window.location.origin);
             
-            const apiUrl = new URL('http://localhost:3001/v1/transcribe');
-            apiUrl.searchParams.append('output_format', outputFormat);
-            apiUrl.searchParams.append('model', model);
+            // Append all options from the form
+            apiUrl.searchParams.append('output_format', outputFormatSelect.value);
+            apiUrl.searchParams.append('model', modelSelect.value);
+            apiUrl.searchParams.append('diarization', diarizationCheckbox.checked);
+            
+            if (languageInput.value) {
+                apiUrl.searchParams.append('language', languageInput.value);
+            }
+            if (outputLangInput.value) {
+                apiUrl.searchParams.append('output_language', outputLangInput.value);
+            }
             
             try {
                 const res = await fetch(apiUrl, {
@@ -229,11 +244,10 @@
                     body: formData
                 });
 
-                statusDiv.textContent = `Status: ${response.status} ${response.statusText}`;
-
-                const result = await response.json();
+                const result = await res.json();
+                statusDiv.textContent = `Status: ${res.status} ${res.statusText}`;
                 
-                if (response.ok) {
+                if (res.ok) {
                     resultPre.textContent = JSON.stringify(result, null, 2);
                 } else {
                     resultPre.textContent = `Fehler: ${JSON.stringify(result, null, 2)}`;
@@ -241,10 +255,19 @@
 
             } catch (error) {
                 console.error('Fehler beim Senden der Daten:', error);
-                statusDiv.textContent = 'Ein Fehler ist aufgetreten.';
+                statusDiv.textContent = 'Ein Fehler ist aufgetreten. Prüfen Sie die Browser-Konsole.';
                 resultPre.textContent = error.toString();
             }
         }
+
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(resultPre.textContent).then(() => {
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => { copyButton.textContent = 'Copy JSON'; }, 2000);
+            }, err => {
+                console.error('Could not copy text: ', err);
+            });
+        });
     </script>
 </body>
 </html>
