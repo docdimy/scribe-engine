@@ -83,8 +83,8 @@ class AudioProcessor:
                 detail=f"Failed to read or process audio file: {str(e)}",
             )
             
-    def cleanup(self, file_path: Optional[str]):
-        """Safely delete a temporary file."""
+    async def cleanup(self, file_path: Optional[str]):
+        """Safely delete the temporary file."""
         if file_path and os.path.exists(file_path):
             try:
                 os.unlink(file_path)
@@ -93,7 +93,7 @@ class AudioProcessor:
                 logger.error(f"Error cleaning up file {file_path}: {e}")
 
     def _get_extension_from_content_type(self, content_type: str) -> str:
-        """Get a file extension from a MIME type."""
+        """Maps content type to file extension."""
         return {
             "audio/mpeg": ".mp3",
             "audio/wav": ".wav",

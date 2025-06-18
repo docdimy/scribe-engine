@@ -1,141 +1,121 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scribe Engine Test</title>
+    <title>Scribe Engine - API Test Console</title>
     <link rel="icon" href="/static/scribe-engine.svg" type="image/svg+xml">
     <style>
         :root {
-            --primary-color: #007bff;
-            --primary-hover: #0056b3;
-            --bg-light: #f7f7f7;
+            --primary-color: #1a56db;
+            --primary-hover: #1e40af;
+            --bg-light: #f9fafb;
             --bg-white: #ffffff;
-            --text-dark: #333;
-            --text-muted: #555;
-            --border-radius: 8px;
-            --transition: 0.2s;
-            --container-max: 800px;
+            --text-dark: #111827;
+            --text-muted: #6b7280;
+            --border-color: #d1d5db;
+            --border-radius: 0.5rem;
+            --box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: var(--font-sans);
             background-color: var(--bg-light);
             color: var(--text-dark);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
-        /* Center logo and title */
-        .header {
+        header {
             background-color: var(--bg-white);
-            padding: 20px;
+            padding: 1rem 2rem;
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 10px;
-            border-bottom: 1px solid #e0e0e0;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            gap: 1rem;
+            border-bottom: 1px solid var(--border-color);
         }
-        .header .logo {
-            height: 40px;
+        header img { height: 32px; }
+        header h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+        main {
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
         }
-        .header h1 { font-size: 1.5rem; margin: 0; }
-        .container {
-            max-width: var(--container-max);
-            margin: 30px auto;
-            background-color: var(--bg-white);
-            border-radius: var(--border-radius);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        .content { padding: 20px; }
-        h2 { margin-top: 0; color: var(--text-dark); }
-        .controls, .options { margin-bottom: 20px; }
-        .controls button {
-            padding: 10px 15px;
-            font-size: 16px;
-            border: none;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            background-color: var(--primary-color);
-            color: var(--bg-white);
-            transition: background-color var(--transition);
-            margin-right: 10px;
-        }
-        .controls button:hover:not(:disabled) { background-color: var(--primary-hover); }
-        .controls button:disabled { background-color: #cccccc; cursor: not-allowed; }
-        #status {
-            margin-top: 10px;
-            font-style: italic;
-            color: var(--text-muted);
-        }
-        .warning {
-            background-color: #fffbe6;
-            color: #8a6d3b;
-            padding: 15px;
-            border-radius: 4px;
-            border: 1px solid #ffeeba;
-            margin-bottom: 20px;
-        }
-        pre {
-            background-color: #eee;
-            padding: 15px;
-            border-radius: var(--border-radius);
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        .copy-btn {
-            margin-top: 10px;
-            padding: 8px 12px;
-            font-size: 14px;
-            border: none;
-            border-radius: var(--border-radius);
-            cursor: pointer;
-            background-color: var(--primary-color);
-            color: var(--bg-white);
-            transition: background-color var(--transition);
-        }
-        .copy-btn:hover { background-color: var(--primary-hover); }
-        label { display: block; margin-bottom: 5px; font-weight: 500; }
-        input[type="text"], select {
-            width: 100%; padding: 8px; margin-bottom: 10px;
-            border-radius: 4px; border: 1px solid #ddd;
-        }
-        .checkbox-group { display: flex; align-items: center; margin-bottom: 10px; }
-        .checkbox-group input { margin-right: 8px; }
-        .options-grid {
+        .grid-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
+            gap: 2rem;
         }
+        .card {
+            background: var(--bg-white);
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 1.5rem;
+        }
+        h2 { margin-top: 0; font-size: 1.1rem; font-weight: 600; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.75rem; margin-bottom: 1rem;}
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.875rem; }
+        input[type="text"], select {
+            width: 100%; padding: 0.5rem 0.75rem;
+            border-radius: var(--border-radius); border: 1px solid var(--border-color);
+            background-color: var(--bg-light);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.3);
+        }
+        .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .checkbox-group { display: flex; align-items: center; margin-top: 1rem; }
+        .checkbox-group input { margin-right: 0.5rem; width: 1rem; height: 1rem; }
+        .controls button {
+            padding: 0.6rem 1rem; font-size: 1rem; border: none;
+            border-radius: var(--border-radius); cursor: pointer;
+            background-color: var(--primary-color); color: var(--bg-white);
+            transition: background-color 0.2s; margin-right: 0.75rem;
+            font-weight: 500;
+        }
+        .controls button:hover:not(:disabled) { background-color: var(--primary-hover); }
+        .controls button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+        #status { margin-top: 1rem; font-style: italic; color: var(--text-muted); }
+        .warning, .info {
+            padding: 1rem; border-radius: var(--border-radius); margin-bottom: 1.5rem;
+            border: 1px solid;
+        }
+        .warning { background-color: #fffbeb; color: #92400e; border-color: #fde68a; }
+        .info { background-color: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+        pre {
+            background-color: #111827; color: #f3f4f6; padding: 1rem;
+            border-radius: var(--border-radius); white-space: pre-wrap;
+            word-wrap: break-word; max-height: 60vh; overflow-y: auto;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 0.875rem;
+        }
+        .copy-btn {
+             padding: 0.5rem 0.75rem; font-size: 0.875rem; background-color: #374151;
+        }
+        .copy-btn:hover { background-color: #1f2937; }
+        .result-header { display: flex; justify-content: space-between; align-items: center; }
     </style>
 </head>
 <body>
-    <header class="header">
-        <img src="/static/scribe-engine.svg" alt="Logo" class="logo">
-        <h1>Web Test</h1>
+    <header>
+        <img src="/static/scribe-engine.svg" alt="Logo">
+        <h1>Scribe Engine - API Test Console</h1>
     </header>
-    <div class="container">
-        <h1>Scribe Engine - Web Test</h1>
-        <p>
-            Nehmen Sie Audio direkt im Browser auf und senden Sie es zur Transkription und Analyse an die Scribe Engine API.
-        </p>
 
-        <div id="micWarning" class="warning" style="display: none;">
-            <strong>Mikrofonzugriff eingeschränkt:</strong><br>
-            Für Audioaufnahmen rufen Sie diese Seite bitte über <code>http://localhost</code> oder eine sichere <code>https://</code> Verbindung auf. Browser blockieren den Mikrofonzugriff auf unsicheren Nicht-Localhost-Domains.
+    <main>
+        <div class="info">
+            <strong>Welcome!</strong> This page allows you to test the Scribe Engine API directly from your browser.
         </div>
-        
-        <div class="content">
-            <div class="controls">
-                <button id="recordButton">Aufnahme starten</button>
-                <button id="stopButton" disabled>Aufnahme stoppen</button>
-                <div id="status">Bereit zum Aufnehmen</div>
-            </div>
-            
-            <div class="options">
-                <h2>Optionen</h2>
+        <div id="micWarning" class="warning" style="display: none;">
+            <strong>Microphone Access Restricted:</strong> To record audio, please access this page via <code>http://localhost</code> or a secure <code>https://</code> connection.
+        </div>
+
+        <div class="grid-container">
+            <div class="card">
+                <h2>1. Configure Request</h2>
                 <div class="options-grid">
                     <div>
                         <label for="apiKey">API Key</label>
@@ -150,15 +130,33 @@
                         </select>
                     </div>
                     <div>
+                        <label for="specialty">Medical Specialty</label>
+                        <select id="specialty">
+                            <option value="general">General</option>
+                            <option value="cardiology">Cardiology</option>
+                            <option value="oncology">Oncology</option>
+                            <option value="neurology">Neurology</option>
+                            <option value="orthopedics">Orthopedics</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="conversationType">Conversation Type</label>
+                        <select id="conversationType">
+                            <option value="consultation">Consultation</option>
+                            <option value="dictation">Dictation</option>
+                            <option value="interview">Interview</option>
+                        </select>
+                    </div>
+                    <div>
                         <label for="language">Input Language</label>
-                        <input type="text" id="language" placeholder="auto">
+                        <input type="text" id="language" placeholder="e.g., en, de, auto">
                     </div>
                     <div>
                         <label for="outputLanguage">Output Language</label>
-                        <input type="text" id="outputLanguage" placeholder="Defaults to input language">
+                        <input type="text" id="outputLanguage" placeholder="Defaults to input">
                     </div>
                     <div>
-                        <label for="outputFormat">Ausgabeformat</label>
+                        <label for="outputFormat">Output Format</label>
                         <select id="outputFormat">
                             <option value="json">JSON</option>
                             <option value="fhir">FHIR</option>
@@ -172,11 +170,24 @@
                 </div>
             </div>
 
-            <h2>Ergebnis</h2>
-            <pre id="result">Noch kein Ergebnis.</pre>
-            <button id="copyButton" class="copy-btn">Copy JSON</button>
+            <div class="card">
+                <h2>2. Record & Transcribe</h2>
+                <div class="controls">
+                    <button id="recordButton">Start Recording</button>
+                    <button id="stopButton" disabled>Stop Recording</button>
+                </div>
+                <div id="status">Ready to record</div>
+            </div>
+
+            <div class="card" style="grid-column: span 2;">
+                <div class="result-header">
+                    <h2>3. API Result</h2>
+                    <button id="copyButton" class="copy-btn">Copy</button>
+                </div>
+                <pre id="result">No result yet.</pre>
+            </div>
         </div>
-    </div>
+    </main>
 
     <script>
         const recordButton = document.getElementById('recordButton');
@@ -184,57 +195,52 @@
         const statusDiv = document.getElementById('status');
         const resultPre = document.getElementById('result');
         const copyButton = document.getElementById('copyButton');
+        const micWarningDiv = document.getElementById('micWarning');
+
+        // Form inputs
         const apiKeyInput = document.getElementById('apiKey');
         const modelSelect = document.getElementById('model');
-        const diarizationCheckbox = document.getElementById('diarization');
+        const specialtySelect = document.getElementById('specialty');
+        const conversationTypeSelect = document.getElementById('conversationType');
         const languageInput = document.getElementById('language');
         const outputLangInput = document.getElementById('outputLanguage');
         const outputFormatSelect = document.getElementById('outputFormat');
-        const micWarningDiv = document.getElementById('micWarning');
+        const diarizationCheckbox = document.getElementById('diarization');
 
         let mediaRecorder;
         let audioChunks = [];
 
-        // Check for secure context for microphone access
         if (!navigator.mediaDevices || !window.isSecureContext) {
             recordButton.disabled = true;
             micWarningDiv.style.display = 'block';
-            statusDiv.textContent = 'Mikrofon nicht verfügbar.';
+            statusDiv.textContent = 'Microphone not available on insecure connections.';
         }
 
         recordButton.addEventListener('click', async () => {
             try {
-                // Request mono audio at 16 kHz
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
                 audioChunks = [];
-                // Set bitrate to 96 kbps
-                mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 96000 });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
                 mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-                mediaRecorder.onstop = async () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    statusDiv.textContent = 'Stopped. Sending data...';
-                    await sendData(audioBlob);
-                };
+                mediaRecorder.onstop = () => sendData(new Blob(audioChunks, { type: 'audio/webm' }));
                 mediaRecorder.start();
-
                 recordButton.disabled = true;
                 stopButton.disabled = false;
-                statusDiv.textContent = 'Aufnahme läuft...';
-                resultPre.textContent = 'Noch kein Ergebnis.';
-
+                statusDiv.textContent = 'Recording...';
             } catch (err) {
-                console.error('Fehler beim Zugriff auf das Mikrofon:', err);
-                statusDiv.textContent = 'Fehler: Mikrofonzugriff verweigert. Bitte Berechtigung erteilen.';
+                console.error('Error accessing microphone:', err);
+                statusDiv.textContent = 'Error: Could not access microphone. Please grant permission.';
                 micWarningDiv.style.display = 'block';
             }
         });
 
         stopButton.addEventListener('click', () => {
-            if (mediaRecorder && mediaRecorder.state === "recording") {
+            if (mediaRecorder?.state === "recording") {
                 mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Mikrofon freigeben
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 recordButton.disabled = false;
                 stopButton.disabled = true;
+                statusDiv.textContent = 'Recording stopped. Sending to API...';
             }
         });
 
@@ -242,20 +248,19 @@
             const formData = new FormData();
             formData.append('audio_file', audioBlob, 'recording.webm');
             
-            // Use relative URL to avoid CORS issues and work on any server IP
             const apiUrl = new URL('/v1/transcribe', window.location.origin);
             
             // Append all options from the form
-            apiUrl.searchParams.append('output_format', outputFormatSelect.value);
             apiUrl.searchParams.append('model', modelSelect.value);
+            apiUrl.searchParams.append('specialty', specialtySelect.value);
+            apiUrl.searchParams.append('conversation_type', conversationTypeSelect.value);
+            apiUrl.searchParams.append('output_format', outputFormatSelect.value);
             apiUrl.searchParams.append('diarization', diarizationCheckbox.checked);
             
-            if (languageInput.value) {
-                apiUrl.searchParams.append('language', languageInput.value);
-            }
-            if (outputLangInput.value) {
-                apiUrl.searchParams.append('output_language', outputLangInput.value);
-            }
+            if (languageInput.value) apiUrl.searchParams.append('language', languageInput.value);
+            if (outputLangInput.value) apiUrl.searchParams.append('output_language', outputLangInput.value);
+            
+            resultPre.textContent = "Processing...";
             
             try {
                 const res = await fetch(apiUrl, {
@@ -265,17 +270,12 @@
                 });
 
                 const result = await res.json();
-                statusDiv.textContent = `Status: ${res.status} ${res.statusText}`;
-                
-                if (res.ok) {
-                    resultPre.textContent = JSON.stringify(result, null, 2);
-                } else {
-                    resultPre.textContent = `Fehler: ${JSON.stringify(result, null, 2)}`;
-                }
+                statusDiv.textContent = `API Response: ${res.status} ${res.statusText}`;
+                resultPre.textContent = JSON.stringify(result, null, 2);
 
             } catch (error) {
-                console.error('Fehler beim Senden der Daten:', error);
-                statusDiv.textContent = 'Ein Fehler ist aufgetreten. Prüfen Sie die Browser-Konsole.';
+                console.error('Error sending data:', error);
+                statusDiv.textContent = 'An error occurred. Check the browser console.';
                 resultPre.textContent = error.toString();
             }
         }
@@ -283,7 +283,7 @@
         copyButton.addEventListener('click', () => {
             navigator.clipboard.writeText(resultPre.textContent).then(() => {
                 copyButton.textContent = 'Copied!';
-                setTimeout(() => { copyButton.textContent = 'Copy JSON'; }, 2000);
+                setTimeout(() => { copyButton.textContent = 'Copy'; }, 2000);
             }, err => {
                 console.error('Could not copy text: ', err);
             });
