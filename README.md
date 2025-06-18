@@ -97,13 +97,13 @@ This is the primary endpoint for all transcription and analysis tasks. It accept
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `audio_file` | file | **Required** | The audio file to be processed. |
-| `output_format` | enum | `json` | Desired output format. Can be `json`, `xml`, or `fhir`. |
+| `model` | enum | `gpt-4.1-nano` | The LLM to use for analysis. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
 | `diarization` | bool | `false` | If `true`, enables speaker separation. This automatically uses AssemblyAI as the STT backend. |
 | `language` | string | `auto` | ISO 639-1 code for the **input** audio language. `auto` enables automatic detection. |
 | `output_language` | string | detected language | ISO 639-1 code for the **output** analysis language. Defaults to the detected input language. |
-| `model` | enum | `gpt-4.1-nano` | The LLM to use for analysis. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
-| `specialty` | string | `general` | Medical specialty to tailor the analysis (e.g., `cardiology`). |
+| `output_format` | enum | `json` | Desired output format. Can be `json`, `xml`, or `fhir`. |
 | `fhir_bundle_type` | enum | `document` | The type of FHIR bundle to generate. Can be `document` or `transaction`. **Only used if `output_format=fhir`**. |
+| `specialty` | string | `general` | Medical specialty to tailor the analysis (e.g., `cardiology`). |
 | `conversation_type`| string | `consultation` | The type of conversation for better contextual analysis. |
 
 ---
