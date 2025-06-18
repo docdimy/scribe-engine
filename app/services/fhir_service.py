@@ -79,7 +79,7 @@ class FHIRService:
                         "resource": resource.dict(),
                         "request": {
                             "method": "POST",
-                            "url": resource.resource_type
+                            "url": resource.__class__.get_resource_type()
                         }
                     })
                 bundle = Bundle(
@@ -107,7 +107,7 @@ class FHIRService:
                 # Add composition to the list of main resources
                 resources.insert(0, composition)
                 
-                bundle_entries = [{"fullUrl": f"{self.base_url}/{r.resource_type}/{r.id}", "resource": r.dict()} for r in resources]
+                bundle_entries = [{"fullUrl": f"{self.base_url}/{r.__class__.get_resource_type()}/{r.id}", "resource": r.dict()} for r in resources]
                 
                 bundle = Bundle(
                     id=fhir_bundle_id,
