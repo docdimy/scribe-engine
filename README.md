@@ -75,8 +75,13 @@ docker-compose -f docker-compose.development.yml down
 
 ### 4. Test API
 
-Check if the service is running:
+The service includes a simple web interface for easy testing. Once the container is running, open your browser and navigate to:
 
+**➡️ <http://localhost:3001/>**
+
+You can use this interface to record audio directly in the browser and send it to the API.
+
+Alternatively, you can use `curl` to check if the service is running:
 ```bash
 curl http://localhost:3001/health
 ```
@@ -87,6 +92,10 @@ A successful response should look like this:
 ```
 
 ## 📋 API Documentation
+
+The API is documented via OpenAPI and can be explored at `http://localhost:3001/docs` when running in development mode.
+
+For manual tests, it is recommended to use the **built-in web interface at <http://localhost:3001/>**. The following `curl` examples are for automated scripting.
 
 ### Main Endpoint: `POST /v1/transcribe`
 
@@ -198,40 +207,43 @@ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." ...
 
 ## 📊 Monitoring
 
-### Prometheus Metrics
+The service exposes key performance and usage metrics in the Prometheus format. This allows for easy integration with monitoring dashboards (e.g., Grafana) and alerting systems.
 
+### Accessing Metrics
+
+The metrics are available at the `/metrics` endpoint.
+
+```bash
+curl http://localhost:3001/metrics
 ```
-# HTTP Requests
-http_requests_total{method="POST", endpoint="/v1/transcribe", status="200"}
 
-# Request Duration
-http_request_duration_seconds
+### Key Metrics
 
-# Audio Processing Duration
-audio_processing_duration_seconds
-```
+- `http_requests_total`: A counter for all HTTP requests, labeled by method, endpoint, and status code. Helps to monitor traffic and error rates.
+- `http_request_duration_seconds`: A histogram measuring the latency of HTTP requests. Useful for performance analysis and SLO tracking.
+- `audio_processing_duration_seconds`: A histogram specifically measuring the time taken for audio validation and saving.
 
 ### Health Checks
 
-```bash
-# Basic health check
-curl http://localhost:3001/health
-
-# Detailed readiness check
-curl http://localhost:3001/ready
-```
+To ensure the service is running and ready to accept traffic, two health check endpoints are provided:
+- `/health`: A simple check to confirm the service process is running.
+- `/ready`: A more detailed check that can be extended to verify connections to downstream dependencies (like OpenAI, Redis, etc.).
 
 ## 🧪 Testing
 
+*This section outlines the planned testing strategy. The test files themselves have not yet been implemented.*
+
+A robust testing suite is planned to ensure reliability and maintainability. Tests will be organized into unit and integration tests using `pytest`.
+
 ```bash
-# Unit tests
-python -m pytest tests/unit/
+# Planned command for running unit tests
+# python -m pytest tests/unit/
 
-# Integration tests
-python -m pytest tests/integration/
+# Planned command for running integration tests
+# python -m pytest tests/integration/
 
-# All tests
-python -m pytest
+# Planned command for running all tests
+# python -m pytest
 ```
 
 ## 📦 Deployment

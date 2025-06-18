@@ -12,12 +12,13 @@ from fastapi import FastAPI, HTTPException, Request, Depends, status, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from starlette.responses import Response
+from starlette.responses import Response, FileResponse
 
 from app.config import settings, OutputFormat, ModelName, STTModel, FHIRBundleType
 from app.core.logging import setup_logging, get_logger, audit_logger
@@ -81,6 +82,9 @@ app = FastAPI(
         {"url": settings.api_base_url, "description": "Production API"},
     ]
 )
+
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # CORS middleware
 app.add_middleware(
@@ -179,6 +183,13 @@ async def readiness_check():
         uptime_seconds=int(time.time()),
         details=details
     )
+
+
+# Serve main page
+@app.get("/", include_in_schema=False)
+async def read_index():
+    """Serviert die statische Test-Webseite"""
+    return FileResponse('app/static/index.html')
 
 
 # Prometheus metrics endpoint

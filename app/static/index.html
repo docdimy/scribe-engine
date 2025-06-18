@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scribe Engine Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 40px;
+            background-color: #f7f7f7;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .controls, .options {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #555;
+        }
+        pre {
+            background-color: #eee;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Scribe Engine - Web Test</h1>
+        <p>
+            Nehmen Sie Audio direkt im Browser auf und senden Sie es zur Transkription und Analyse an die Scribe Engine API.
+        </p>
+
+        <div class="controls">
+            <button id="recordButton">Aufnahme starten</button>
+            <button id="stopButton" disabled>Aufnahme stoppen</button>
+            <div id="status">Bereit zum Aufnehmen</div>
+        </div>
+        
+        <div class="options">
+            <h2>Optionen</h2>
+            <label for="apiKey">API Key</label>
+            <input type="text" id="apiKey" value="test_api_key">
+            
+            <label for="outputFormat">Ausgabeformat</label>
+            <select id="outputFormat">
+                <option value="json">JSON</option>
+                <option value="fhir">FHIR</option>
+                <option value="xml">XML</option>
+            </select>
+
+            <label for="model">LLM Model</label>
+            <select id="model">
+                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4o-mini">gpt-4o-mini</option>
+            </select>
+        </div>
+
+        <h2>Ergebnis</h2>
+        <pre id="result">Noch kein Ergebnis.</pre>
+    </div>
+
+    <script>
+        const recordButton = document.getElementById('recordButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusDiv = document.getElementById('status');
+        const resultPre = document.getElementById('result');
+        const apiKeyInput = document.getElementById('apiKey');
+        const outputFormatSelect = document.getElementById('outputFormat');
+        const modelSelect = document.getElementById('model');
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        recordButton.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.start();
+
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    audioChunks.push(event.data);
+                });
+
+                recordButton.disabled = true;
+                stopButton.disabled = false;
+                statusDiv.textContent = 'Aufnahme läuft...';
+                resultPre.textContent = 'Noch kein Ergebnis.';
+
+            } catch (err) {
+                console.error('Fehler beim Zugriff auf das Mikrofon:', err);
+                statusDiv.textContent = 'Fehler: Mikrofonzugriff verweigert.';
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Mikrofon freigeben
+            
+            mediaRecorder.addEventListener('stop', async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioChunks = [];
+
+                recordButton.disabled = false;
+                stopButton.disabled = true;
+                statusDiv.textContent = 'Aufnahme gestoppt. Sende Daten...';
+
+                await sendData(audioBlob);
+            });
+        });
+
+        async function sendData(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio_file', audioBlob, 'recording.webm');
+            
+            const apiKey = apiKeyInput.value;
+            const outputFormat = outputFormatSelect.value;
+            const model = modelSelect.value;
+            
+            const apiUrl = new URL('http://localhost:3001/v1/transcribe');
+            apiUrl.searchParams.append('output_format', outputFormat);
+            apiUrl.searchParams.append('model', model);
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                    },
+                    body: formData,
+                });
+
+                statusDiv.textContent = `Status: ${response.status} ${response.statusText}`;
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultPre.textContent = JSON.stringify(result, null, 2);
+                } else {
+                    resultPre.textContent = `Fehler: ${JSON.stringify(result, null, 2)}`;
+                }
+
+            } catch (error) {
+                console.error('Fehler beim Senden der Daten:', error);
+                statusDiv.textContent = 'Ein Fehler ist aufgetreten.';
+                resultPre.textContent = error.toString();
+            }
+        }
+    </script>
+
+</body>
+</html> 
