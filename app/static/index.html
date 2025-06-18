@@ -23,17 +23,19 @@
             background-color: var(--bg-light);
             color: var(--text-dark);
         }
+        /* Center logo and title */
         .header {
             background-color: var(--bg-white);
             padding: 20px;
             display: flex;
             align-items: center;
+            justify-content: center;
+            gap: 10px;
             border-bottom: 1px solid #e0e0e0;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         .header .logo {
             height: 40px;
-            margin-right: 15px;
         }
         .header h1 { font-size: 1.5rem; margin: 0; }
         .container {
@@ -74,6 +76,18 @@
             max-height: 400px;
             overflow-y: auto;
         }
+        .copy-btn {
+            margin-top: 10px;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            background-color: var(--primary-color);
+            color: var(--bg-white);
+            transition: background-color var(--transition);
+        }
+        .copy-btn:hover { background-color: var(--primary-hover); }
         label { display: block; margin-bottom: 5px; font-weight: 500; }
         input[type="text"], select {
             width: 100%; padding: 8px; margin-bottom: 10px;
@@ -81,6 +95,11 @@
         }
         .checkbox-group { display: flex; align-items: center; margin-bottom: 10px; }
         .checkbox-group input { margin-right: 8px; }
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
     </style>
 </head>
 <body>
@@ -91,67 +110,79 @@
     <div class="container">
         <div class="content">
             <p>Capture audio directly in the browser and send it for transcription and analysis to the Scribe Engine API.</p>
+
             <div class="controls">
                 <button id="recordButton">Start Recording</button>
                 <button id="stopButton" disabled>Stop Recording</button>
                 <div id="status">Ready to record</div>
             </div>
+
             <div class="options">
                 <h2>Options</h2>
-                <label for="apiKey">API Key</label>
-                <input type="text" id="apiKey" placeholder="Enter your API key">
-                <label for="model">LLM Model</label>
-                <select id="model">
-                    <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                    <option value="gpt-4o">gpt-4o</option>
-                </select>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="diarization">
-                    <label for="diarization">Diarization (speaker separation)</label>
+                <div class="options-grid">
+                    <div>
+                        <label for="apiKey">API Key</label>
+                        <input type="text" id="apiKey" placeholder="Enter your API key">
+                        <label for="model">LLM Model</label>
+                        <select id="model">
+                            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                        </select>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="diarization">
+                            <label for="diarization">Diarization (speaker separation)</label>
+                        </div>
+                        <label for="language">Language (Input, ISO 639-1)</label>
+                        <input type="text" id="language" value="auto">
+                        <label for="outputLanguage">Language (Output, ISO 639-1)</label>
+                        <input type="text" id="outputLanguage" placeholder="e.g. en">
+                    </div>
+                    <div>
+                        <label for="outputFormat">Output Format</label>
+                        <select id="outputFormat">
+                            <option value="json">JSON</option>
+                            <option value="xml">XML</option>
+                            <option value="fhir">FHIR</option>
+                        </select>
+                        <div id="fhirOptions" style="display:none;">
+                            <label for="fhirBundleType">FHIR Bundle Type</label>
+                            <select id="fhirBundleType">
+                                <option value="document">document</option>
+                                <option value="transaction">transaction</option>
+                            </select>
+                        </div>
+                        <label for="specialty">Specialty</label>
+                        <select id="specialty">
+                            <option value="general">General</option>
+                            <option value="cardiology">Cardiology</option>
+                            <option value="gastroenterology">Gastroenterology</option>
+                            <option value="infectiology">Infectiology</option>
+                            <option value="neurology">Neurology</option>
+                        </select>
+                        <label for="conversationType">Conversation Type</label>
+                        <select id="conversationType">
+                            <option value="consultation">Consultation</option>
+                            <option value="diagnosis">Diagnosis</option>
+                            <option value="follow-up">Follow-up</option>
+                            <option value="emergency">Emergency</option>
+                        </select>
+                    </div>
                 </div>
-                <label for="language">Language (Input, ISO 639-1)</label>
-                <input type="text" id="language" value="auto">
-                <label for="outputLanguage">Language (Output, ISO 639-1)</label>
-                <input type="text" id="outputLanguage" placeholder="e.g. en">
-                <label for="outputFormat">Output Format</label>
-                <select id="outputFormat">
-                    <option value="json">JSON</option>
-                    <option value="xml">XML</option>
-                    <option value="fhir">FHIR</option>
-                </select>
-                <div id="fhirOptions" style="display:none;">
-                    <label for="fhirBundleType">FHIR Bundle Type</label>
-                    <select id="fhirBundleType">
-                        <option value="document">document</option>
-                        <option value="transaction">transaction</option>
-                    </select>
-                </div>
-                <label for="specialty">Specialty</label>
-<select id="specialty">
-    <option value="general">General</option>
-    <option value="cardiology">Cardiology</option>
-    <option value="gastroenterology">Gastroenterology</option>
-    <option value="infectiology">Infectiology</option>
-    <option value="neurology">Neurology</option>
-</select>
-<label for="conversationType">Conversation Type</label>
-<select id="conversationType">
-    <option value="consultation">Consultation</option>
-    <option value="diagnosis">Diagnosis</option>
-    <option value="follow-up">Follow-up</option>
-    <option value="emergency">Emergency</option>
-</select>
             </div>
+
             <h2>Result</h2>
             <pre id="result">No result yet.</pre>
+            <button class="copy-btn" id="copyButton">Copy Result</button>
         </div>
     </div>
+
     <script>
         const recordButton = document.getElementById('recordButton');
         const stopButton = document.getElementById('stopButton');
         const statusDiv = document.getElementById('status');
         const resultPre = document.getElementById('result');
+        const copyButton = document.getElementById('copyButton');
         const apiKeyInput = document.getElementById('apiKey');
         const modelSelect = document.getElementById('model');
         const diarizationCheckbox = document.getElementById('diarization');
@@ -160,18 +191,29 @@
         const outputFormatSelect = document.getElementById('outputFormat');
         const fhirOptions = document.getElementById('fhirOptions');
         const fhirBundleSelect = document.getElementById('fhirBundleType');
-        const specialtyInput = document.getElementById('specialty');
-        const conversationInput = document.getElementById('conversationType');
+        const specialtySelect = document.getElementById('specialty');
+        const conversationSelect = document.getElementById('conversationType');
         let mediaRecorder, audioChunks = [];
+
         outputFormatSelect.addEventListener('change', () => {
             fhirOptions.style.display = outputFormatSelect.value === 'fhir' ? 'block' : 'none';
         });
+
         recordButton.addEventListener('click', async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
+                // Request mono audio at 16 kHz
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+                audioChunks = [];
+                // Set bitrate to 96 kbps
+                mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 96000 });
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    statusDiv.textContent = 'Stopped. Sending data...';
+                    await sendData(audioBlob);
+                };
                 mediaRecorder.start();
-                mediaRecorder.addEventListener('dataavailable', e => audioChunks.push(e.data));
+
                 recordButton.disabled = true;
                 stopButton.disabled = false;
                 statusDiv.textContent = 'Recording...';
@@ -181,18 +223,20 @@
                 statusDiv.textContent = 'Error: Microphone access denied.';
             }
         });
+
         stopButton.addEventListener('click', () => {
             mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(t => t.stop());
-            mediaRecorder.addEventListener('stop', async () => {
-                const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                audioChunks = [];
-                recordButton.disabled = false;
-                stopButton.disabled = true;
-                statusDiv.textContent = 'Stopped. Sending data...';
-                await sendData(blob);
-            });
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            recordButton.disabled = false;
+            stopButton.disabled = true;
         });
+
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(resultPre.textContent);
+            copyButton.textContent = 'Copied!';
+            setTimeout(() => copyButton.textContent = 'Copy Result', 2000);
+        });
+
         async function sendData(audioBlob) {
             const formData = new FormData();
             formData.append('audio_file', audioBlob, 'recording.webm');
@@ -202,8 +246,8 @@
                 language: languageInput.value,
                 output_language: outputLangInput.value || languageInput.value,
                 output_format: outputFormatSelect.value,
-                specialty: specialtyInput.value,
-                conversation_type: conversationInput.value
+                specialty: specialtySelect.value,
+                conversation_type: conversationSelect.value
             });
             if (outputFormatSelect.value === 'fhir') params.append('fhir_bundle_type', fhirBundleSelect.value);
             const apiUrl = `http://localhost:3001/v1/transcribe?${params}`;
