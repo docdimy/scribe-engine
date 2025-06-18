@@ -10,23 +10,27 @@ from typing import List, Optional, Dict, Any
 import httpx
 from openai import AsyncOpenAI
 import assemblyai as aai
-from assemblyai.errors import AssemblyAIError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+# Try to import the specific error class, fall back if it doesn't exist
+try:
+    from assemblyai.errors import AssemblyAIError
+except ImportError:
+    AssemblyAIError = None
+
 from app.config import settings
 from app.models.responses import TranscriptSegment, TranscriptionResult
 from app.core.logging import get_logger, audit_logger
 from app.core.security import DataEncryption
 import io
 import json
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = get_logger(__name__)
 
 # Define which exceptions should trigger a retry
-retryable_exceptions = (
-    httpx.TimeoutException,
-    AssemblyAIError, # General AssemblyAI errors
-    # Add other transient exceptions if needed
-)
+retryable_exceptions = [httpx.TimeoutException]
+if AssemblyAIError:
+    retryable_exceptions.append(AssemblyAIError)
 
 # Define retry condition for OpenAI server errors (5xx)
 def is_openai_server_error(exception):
@@ -73,7 +77,7 @@ class STTService:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=60),
         stop=stop_after_attempt(3),
-        retry=(retry_if_exception_type(retryable_exceptions) | retry_if_exception_type(is_openai_server_error))
+        retry=(retry_if_exception_type(httpx.TimeoutException) | retry_if_exception_type(is_openai_server_error))
     )
     async def _transcribe_with_openai(
         self,
@@ -108,7 +112,7 @@ class STTService:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=60),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(retryable_exceptions)
+        retry=retry_if_exception_type(tuple(retryable_exceptions))
     )
     async def _transcribe_with_assemblyai(
         self,
