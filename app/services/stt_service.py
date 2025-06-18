@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 from openai import AsyncOpenAI
 import assemblyai as aai
+from assemblyai.errors import AssemblyAIError
 from app.config import settings
 from app.models.responses import TranscriptSegment, TranscriptionResult
 from app.core.logging import get_logger, audit_logger
@@ -23,7 +24,7 @@ logger = get_logger(__name__)
 # Define which exceptions should trigger a retry
 retryable_exceptions = (
     httpx.TimeoutException,
-    aai.errors.AssemblyAIError, # General AssemblyAI errors
+    AssemblyAIError, # General AssemblyAI errors
     # Add other transient exceptions if needed
 )
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/static/scribe-engine.svg" alt="Scribe Engine Logo" width="200">
+  <img src="app/static/scribe-engine.svg" alt="Scribe Engine Logo" width="400">
 </p>
 <h1 align="center">Medical Audio Transcription & Analysis</h1>
 
