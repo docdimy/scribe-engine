@@ -20,6 +20,7 @@ structlog
 
 # Audio Processing
 mutagen
+python-multipart
 
 # STT / LLM SDKs
 openai
