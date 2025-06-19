@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     token_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=30)
     jwt_issuer: str = Field(default="numediq.de")
+    data_encryption_key: str = Field(..., env="DATA_ENCRYPTION_KEY")
     
     # Monitoring
     enable_metrics: bool = Field(default=True)

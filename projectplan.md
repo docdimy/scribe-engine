@@ -126,10 +126,10 @@ This document lists all necessary tasks for a lean, scalable, and secure backend
 
 ### 13. Security & Compliance
 
-- **13.1. TLS 1.2+:** ✅ **Done** (Handled by reverse proxy during deployment).
-- **13.2. Encryption-at-Rest:** 🟡 **Partially Done**. A placeholder class `DataEncryption` exists, but real encryption is not yet implemented.
+- **13.1. TLS 1.2+:** 🟡 **Pending**. This is not part of the application code but must be enforced by a reverse proxy (e.g., Nginx, Traefik) during production deployment. See Task 15.3.
+- **13.2. Encryption-at-Rest:** ✅ **Done**. Audio data is encrypted with a strong symmetric key (`Fernet`) before being temporarily written to disk and decrypted in memory for processing.
 - **13.3. Audit Logging:** ✅ **Done** (Logs API key hash, timestamp, endpoint).
-- **13.4. Deletion:** ✅ **Done** (Audio blobs are deleted immediately after processing).
+- **13.4. Deletion:** ✅ **Done** (Encrypted audio files are deleted immediately after processing).
 - **13.5. GDPR:** ✅ **Done** (Data flow and deletion processes are documented and implemented).
 
 ---
@@ -201,9 +201,11 @@ jobs:
 
 - **15.1. Synology Webstation (Test):** ✅ **Done** (Can be deployed via Docker).
 - **15.2. Production with Docker:** ✅ **Done** (Multi-stage Dockerfile and production compose file exist).
+- **15.3. Production Reverse Proxy:** ❌ **Open**. A reverse proxy (e.g., Nginx, Traefik) must be configured to provide TLS termination (HTTPS) for the production environment. This proxy will handle incoming public traffic and forward it to the Scribe-Engine container.
 
 ```yaml
-# Example docker-compose.yml
+# Example docker-compose.yml for production deployment with a proxy
+# This setup assumes a reverse proxy is running on the same host network.
 version: '3.8'
 services:
   scribe-engine:

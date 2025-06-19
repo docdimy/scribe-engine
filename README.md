@@ -94,6 +94,18 @@ A successful response should look like this:
 {"status":"healthy","timestamp":"...","version":"1.0.0","uptime_seconds":...}
 ```
 
+## 🌐 Production Deployment
+
+For a production environment, it is **critical** to not expose the service directly to the internet. Instead, a **reverse proxy** (like Nginx, Traefik, or a cloud load balancer) should be used.
+
+### Key Responsibilities of a Reverse Proxy:
+
+- **TLS Termination (HTTPS):** The proxy handles incoming HTTPS traffic, decrypts it, and forwards it to the Scribe Engine service over the internal Docker network. This ensures secure "Encryption-in-Transit" between the client and the server.
+- **Load Balancing:** If you run multiple instances of the service, the proxy can distribute traffic among them.
+- **Security:** It can provide an additional layer of security, handling things like rate limiting, IP whitelisting, and protection against common web vulnerabilities.
+
+The provided `docker-compose.production.yml` is designed to be used behind such a proxy. It does not expose any ports to the host machine, assuming the proxy will connect to it via a shared Docker network.
+
 ## 📋 API Documentation
 
 The API is documented via OpenAPI and can be explored at `http://localhost:3001/docs` when running in development mode.
@@ -203,9 +215,10 @@ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." ...
 
 ### Data Protection
 
-- **Encryption-at-Rest** for temporary data
-- **Automatic deletion** after processing
-- **Audit logging** of all API access
+- **Encryption-at-Rest:** All audio data is encrypted using a strong symmetric key (`Fernet`) before it is temporarily written to disk. The data is only decrypted in memory for processing and is immediately deleted afterwards.
+- **Encryption-in-Transit:** Communication with external APIs (OpenAI, AssemblyAI) is done exclusively over HTTPS. For client-to-server communication, TLS termination must be handled by a reverse proxy in production (see "Production Deployment" section).
+- **Automatic Deletion:** All temporary files and in-memory data related to a request are securely deleted immediately after processing is complete.
+- **Audit Logging** of all API access
 - **GDPR compliant** with data flow documentation
 
 ## 📊 Monitoring

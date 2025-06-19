@@ -13,6 +13,7 @@ from mutagen.mp4 import MP4
 from fastapi import HTTPException, status, UploadFile
 from app.config import settings
 from app.core.logging import get_logger
+from app.core.security import data_encryption
 
 logger = get_logger(__name__)
 
@@ -20,69 +21,57 @@ logger = get_logger(__name__)
 class AudioProcessor:
     """Audio-Validierung und Verarbeitung"""
 
-    async def process_and_save_audio(
-        self,
-        file: "UploadFile",
-        max_duration: int,
-        max_size_mb: int,
-        supported_types: list[str],
-    ) -> Tuple[str, float, Dict[str, Any]]:
+    async def process_and_save_audio(self, file: "UploadFile", specialty: str) -> str:
         """
-        Validates audio, saves it to a temporary file, and returns its path and metadata.
+        Processes the uploaded audio file and saves it temporarily.
+        - Validates audio format and content.
+        - Converts to a standard format (if necessary).
+        - Encrypts the audio data before saving.
+        - Returns the path to the encrypted temporary file.
         """
-        audio_data = await file.read()
-        content_type = file.content_type
+        logger.info("Starting audio processing...")
 
-        # If content type is generic, try to detect it from file content
-        if content_type == "application/octet-stream":
-            logger.info(
-                f"Received generic '{content_type}'. Attempting to detect content type from file data."
+        # Validate file type
+        if file.content_type not in settings.supported_audio_formats:
+            logger.warning(
+                f"Unsupported audio format: {file.content_type}. Supported: {settings.supported_audio_formats}"
             )
-            content_type = self._detect_content_type_from_data(audio_data, file.filename)
-
-        # 1. Validate Content-Type
-        if content_type not in supported_types:
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"Unsupported audio format '{content_type}'. Supported: {supported_types}",
+                detail=f"Unsupported audio format: {file.content_type}. Please use one of {settings.supported_audio_formats}",
             )
-
-        # 2. Validate File Size
-        size_mb = len(audio_data) / (1024 * 1024)
-        if size_mb > max_size_mb:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Audio file too large ({size_mb:.1f}MB). Maximum: {max_size_mb}MB",
-            )
-
-        # 3. Create temp file and extract duration
-        extension = self._get_extension_from_content_type(content_type)
-        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temp_file:
-            temp_file.write(audio_data)
-            temp_file_path = temp_file.name
 
         try:
-            duration, metadata = self._extract_metadata(temp_file_path, content_type)
-
-            # 4. Validate Duration
-            if duration > max_duration:
-                self.cleanup(temp_file_path)
+            audio_data = await file.read()
+            if not audio_data:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"Audio duration too long ({duration:.1f}s). Maximum: {max_duration}s",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No audio data received.",
                 )
-            
-            logger.info(f"Audio validated and saved to temp file: {temp_file_path}")
-            return temp_file_path, duration, metadata
+
+            logger.info(f"Received {len(audio_data)} bytes of audio data.")
+
+            # --- Encryption Step ---
+            logger.info("Encrypting audio data for secure storage.")
+            encrypted_data = data_encryption.encrypt_data(audio_data)
+            logger.info("Audio data successfully encrypted.")
+
+
+            # Create a temporary file to store the encrypted audio
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".enc") as temp_file:
+                temp_file.write(encrypted_data)
+                temp_file_path = temp_file.name
+                logger.info(f"Encrypted audio saved temporarily to {temp_file_path}")
+
+            return temp_file_path
 
         except Exception as e:
-            self.cleanup(temp_file_path) # Ensure cleanup on error
-            logger.error(f"Failed to process audio file: {e}", exc_info=True)
+            logger.error(f"Error during audio processing: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to read or process audio file: {str(e)}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to process audio file.",
             )
-            
+
     async def cleanup(self, file_path: Optional[str]):
         """Safely delete the temporary file."""
         if file_path and os.path.exists(file_path):

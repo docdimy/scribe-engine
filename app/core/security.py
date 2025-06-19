@@ -10,6 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from cryptography.fernet import Fernet
 from app.config import settings
 from app.core.logging import get_logger
 
@@ -106,22 +107,25 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 class DataEncryption:
-    """Encryption-at-Rest für sensitive Daten"""
+    """Encryption-at-Rest for sensitive data using Fernet."""
     
-    @staticmethod
-    def encrypt_data(data: bytes) -> bytes:
-        """Verschlüsselt Daten (vereinfacht für Demo)"""
-        # In Produktion: Echte Verschlüsselung mit AES
-        return data
-    
-    @staticmethod
-    def decrypt_data(encrypted_data: bytes) -> bytes:
-        """Entschlüsselt Daten (vereinfacht für Demo)"""
-        # In Produktion: Echte Entschlüsselung
-        return encrypted_data
+    def __init__(self, key: str):
+        self.fernet = Fernet(key.encode())
+
+    def encrypt_data(self, data: bytes) -> bytes:
+        """Encrypts data."""
+        return self.fernet.encrypt(data)
+
+    def decrypt_data(self, encrypted_data: bytes) -> bytes:
+        """Decrypts data."""
+        return self.fernet.decrypt(encrypted_data)
     
     @staticmethod
     def secure_delete(data: Any) -> None:
         """Sicheres Löschen von Daten aus dem Speicher"""
         # In Produktion: Überschreiben des Speichers
-        del data 
+        del data
+
+
+# Global instance for data encryption
+data_encryption = DataEncryption(settings.data_encryption_key) 
