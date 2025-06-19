@@ -7,11 +7,11 @@
     <link rel="icon" href="/static/scribe-engine.svg" type="image/svg+xml">
     <style>
         :root {
-            --primary-color: #1a56db;
-            --primary-hover: #1e40af;
-            --bg-light: #f9fafb;
+            --primary-color: #3aa6a9;
+            --primary-hover: #2a8a8d;
+            --bg-light: #f3f3ee;
             --bg-white: #ffffff;
-            --text-dark: #111827;
+            --text-dark: #333333;
             --text-muted: #6b7280;
             --border-color: #d1d5db;
             --border-radius: 0.5rem;
@@ -35,7 +35,7 @@
             gap: 1rem;
             border-bottom: 1px solid var(--border-color);
         }
-        header img { height: 32px; }
+        header img { height: 48px; }
         header h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
         main {
             padding: 2rem;
@@ -93,16 +93,16 @@
             font-size: 0.875rem;
         }
         .copy-btn {
-             padding: 0.5rem 0.75rem; font-size: 0.875rem; background-color: #374151;
+             padding: 0.5rem 0.75rem; font-size: 0.875rem; background-color: var(--primary-color);
         }
-        .copy-btn:hover { background-color: #1f2937; }
+        .copy-btn:hover { background-color: var(--primary-hover); }
         .result-header { display: flex; justify-content: space-between; align-items: center; }
     </style>
 </head>
 <body>
     <header>
         <img src="/static/scribe-engine.svg" alt="Logo">
-        <h1>Scribe Engine - API Test Console</h1>
+        <h1>API Test Console</h1>
     </header>
 
     <main>
@@ -131,21 +131,11 @@
                     </div>
                     <div>
                         <label for="specialty">Medical Specialty</label>
-                        <select id="specialty">
-                            <option value="general">General</option>
-                            <option value="cardiology">Cardiology</option>
-                            <option value="oncology">Oncology</option>
-                            <option value="neurology">Neurology</option>
-                            <option value="orthopedics">Orthopedics</option>
-                        </select>
+                        <input type="text" id="specialty" placeholder="e.g., general, cardiology, orthopedics, etc.">
                     </div>
                     <div>
                         <label for="conversationType">Conversation Type</label>
-                        <select id="conversationType">
-                            <option value="consultation">Consultation</option>
-                            <option value="dictation">Dictation</option>
-                            <option value="interview">Interview</option>
-                        </select>
+                        <input type="text" id="conversationType" placeholder="e.g., consultation, dictation, emergency, etc.">
                     </div>
                     <div>
                         <label for="language">Input Language</label>
@@ -158,7 +148,7 @@
                     <div>
                         <label for="outputFormat">Output Format</label>
                         <select id="outputFormat">
-                            <option value="json">JSON</option>
+                            <option value="json" selected>JSON</option>
                             <option value="fhir">FHIR</option>
                             <option value="xml">XML</option>
                         </select>
@@ -166,6 +156,13 @@
                     <div class="checkbox-group">
                         <input type="checkbox" id="diarization">
                         <label for="diarization">Enable Diarization</label>
+                    </div>
+                    <div id="fhirOptions" style="display: none;">
+                        <label for="fhirBundleType">FHIR Bundle Type</label>
+                        <select id="fhirBundleType">
+                            <option value="document">document</option>
+                            <option value="transaction">transaction</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -200,12 +197,14 @@
         // Form inputs
         const apiKeyInput = document.getElementById('apiKey');
         const modelSelect = document.getElementById('model');
-        const specialtySelect = document.getElementById('specialty');
-        const conversationTypeSelect = document.getElementById('conversationType');
+        const specialtyInput = document.getElementById('specialty');
+        const conversationTypeInput = document.getElementById('conversationType');
         const languageInput = document.getElementById('language');
         const outputLangInput = document.getElementById('outputLanguage');
         const outputFormatSelect = document.getElementById('outputFormat');
         const diarizationCheckbox = document.getElementById('diarization');
+        const fhirOptions = document.getElementById('fhirOptions');
+        const fhirBundleTypeSelect = document.getElementById('fhirBundleType');
 
         let mediaRecorder;
         let audioChunks = [];
@@ -216,11 +215,17 @@
             statusDiv.textContent = 'Microphone not available on insecure connections.';
         }
 
+        outputFormatSelect.addEventListener('change', () => {
+            fhirOptions.style.display = outputFormatSelect.value === 'fhir' ? 'block' : 'none';
+        });
+
         recordButton.addEventListener('click', async () => {
             try {
+                // Request mono audio at 16 kHz, which is optimal for most STT services
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
                 audioChunks = [];
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                // Set bitrate to 96 kbps for a good balance of quality and file size
+                mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 96000 });
                 mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
                 mediaRecorder.onstop = () => sendData(new Blob(audioChunks, { type: 'audio/webm' }));
                 mediaRecorder.start();
@@ -252,11 +257,15 @@
             
             // Append all options from the form
             apiUrl.searchParams.append('model', modelSelect.value);
-            apiUrl.searchParams.append('specialty', specialtySelect.value);
-            apiUrl.searchParams.append('conversation_type', conversationTypeSelect.value);
+            apiUrl.searchParams.append('specialty', specialtyInput.value);
+            apiUrl.searchParams.append('conversation_type', conversationTypeInput.value);
             apiUrl.searchParams.append('output_format', outputFormatSelect.value);
             apiUrl.searchParams.append('diarization', diarizationCheckbox.checked);
             
+            if (outputFormatSelect.value === 'fhir') {
+                apiUrl.searchParams.append('fhir_bundle_type', fhirBundleTypeSelect.value);
+            }
+
             if (languageInput.value) apiUrl.searchParams.append('language', languageInput.value);
             if (outputLangInput.value) apiUrl.searchParams.append('output_language', outputLangInput.value);
             
