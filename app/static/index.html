@@ -348,7 +348,7 @@
             try {
                 uploadProgress.removeAttribute('value');
 
-                const response = await fetch(`/transcribe/?${queryString}`, {
+                const response = await fetch(`/v1/transcribe/?${queryString}`, {
                     method: 'POST',
                     headers: { 'X-API-Key': apiKeyInput.value },
                     body: formData,
