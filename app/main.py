@@ -285,7 +285,7 @@ async def metrics():
 @limiter.limit(f"{settings.rate_limit_requests}/minute")
 async def transcribe_audio(
     request: Request,
-    audio_file: UploadFile = File(...),
+    audio_file: UploadFile = File(..., alias="file"),
     user_info: dict = Depends(get_current_user),
     # Use Enums for automatic validation
     output_format: OutputFormat = OutputFormat.JSON,
@@ -301,15 +301,6 @@ async def transcribe_audio(
 ):
     """
     Transcribe and analyze audio data
-    
-    - **diarization**: Enable speaker diarization (AssemblyAI)
-    - **specialty**: Medical specialty
-    - **conversation_type**: Type of consultation
-    - **output_format**: Output format (json, xml, fhir)
-    - **language**: Input language for transcription (ISO 639-1 or auto)
-    - **output_language**: Output language for analysis (ISO 639-1). Defaults to the detected input language.
-    - **model**: LLM model for analysis
-    - **fhir_bundle_type**: The type of FHIR bundle to generate ('document' or 'transaction'). Only used when output_format is 'fhir'.
     """
     
     start_time = time.time()
@@ -322,8 +313,9 @@ async def transcribe_audio(
             detail="The 'fhir_bundle_type' parameter is only applicable when 'output_format' is 'fhir'."
         )
     
+    processed_audio_path = None
     try:
-        logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'api_key')}")
+        logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'unknown')}")
         
         # 1. Process audio file
         with audio_processing_duration.time():
@@ -332,7 +324,6 @@ async def transcribe_audio(
                 specialty=specialty
             )
         
-        processing_start_time = time.time()
         logger.info(f"Request {request_id}: Audio processed and saved to {processed_audio_path}")
         
         # 2. Determine STT provider and model
@@ -361,7 +352,7 @@ async def transcribe_audio(
         logger.info(f"Request {request_id}: Starting LLM analysis with model: {model} -> output lang: {final_output_language}")
         analysis = await llm_service.analyze(
             transcript=transcript.text,
-            model=model.value, # Pass the enum value
+            model=model.value,
             specialty=specialty,
             conversation_type=conversation_type,
             output_language=final_output_language
@@ -395,7 +386,7 @@ async def transcribe_audio(
             timestamp=datetime.utcnow(),
             transcript=transcript,
             analysis=analysis,
-            output_format=output_format.value,
+            output_format=output_format,
             processing_time_ms=processing_time_ms,
             fhir_bundle=fhir_bundle,
             xml_content=xml_content,
@@ -417,8 +408,9 @@ async def transcribe_audio(
     except Exception as e:
         logger.error(f"Request {request_id} failed with an unexpected error: {e}", exc_info=True)
         # Clean up in case of failure
-        if 'processed_audio_path' in locals() and processed_audio_path:
-            audio_processor.cleanup(processed_audio_path)
+        if processed_audio_path:
+            # Use background task for cleanup here as well to avoid blocking
+            background_tasks.add_task(audio_processor.cleanup, processed_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal server error occurred during transcription."
@@ -476,7 +468,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content=response.model_dump(),
+        content=response.model_dump(by_alias=True),
         headers={"Retry-After": str(int(exc.retry_after))}
     )
 
