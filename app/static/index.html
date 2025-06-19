@@ -121,7 +121,7 @@
 </head>
 <body>
     <header>
-        <img src="/static/scribe-engine.svg" alt="Logo"><br>
+        <img src="/static/scribe-engine.svg" alt="Logo">
         <h1>API Test Console</h1>
     </header>
 
@@ -234,6 +234,24 @@
         let mediaRecorder;
         let audioChunks = [];
         let streamReference;
+
+        const updateStatus = (message, type = 'info') => {
+            statusDiv.textContent = message;
+            statusDiv.className = type; // for potential styling
+        };
+
+        const setProgress = (value, isError = false) => {
+            if (value > 0) {
+                uploadProgress.style.display = 'block';
+                uploadProgress.value = value;
+                uploadProgress.classList.remove('error');
+            } else {
+                uploadProgress.style.display = 'none';
+            }
+            if (isError) {
+                uploadProgress.classList.add('error'); // for potential red color styling
+            }
+        };
 
         const isMicrophoneLikelyAvailable = () => {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -374,23 +392,27 @@
                 if (response.ok) {
                     const result = await response.json();
                     resultPre.textContent = JSON.stringify(result, null, 2);
-                    statusDiv.textContent = 'Success! Result received.';
+                    updateStatus('Success! Result received.', 'success');
+                    setProgress(100);
                 } else {
                     const errorText = await response.text();
                     resultPre.textContent = `API Error: ${response.status} ${response.statusText}\n\n${errorText}`;
-                    statusDiv.textContent = 'An API error occurred.';
+                    updateStatus('An API error occurred.', 'error');
+                    setProgress(100, true);
                 }
             } catch (error) {
                 clearTimeout(timeoutId);
-                uploadProgress.style.display = 'none';
+                setProgress(0, true);
                 if (error.name === 'AbortError') {
                      resultPre.textContent = 'The upload operation was aborted due to a timeout.';
+                     updateStatus('The request timed out.', 'error');
                 } else {
                     resultPre.textContent = `Network or other error: ${error.toString()}`;
-                    statusDiv.textContent = 'Failed to send data.';
+                    updateStatus('Failed to send data.', 'error');
                 }
             } finally {
                 copyButton.disabled = false;
+                setTimeout(() => setProgress(0), 2000); // Hide progress bar after 2s
             }
         };
 
