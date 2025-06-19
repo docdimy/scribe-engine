@@ -3,16 +3,37 @@ version: '3.8'
 services:
   scribe-engine:
     image: dietmarw/scribe-engine:latest
-    container_name: scribe-engine-prod
+    container_name: scribe-engine-api
     ports:
       - "3001:3001"
-    env_file:
-      - .env.production
+    volumes:
+      - ./logs:/app/logs
+      - ./audio_files:/app/audio_files
+    environment:
+      - ENVIRONMENT=production
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+    networks:
+      - scribe-network
+
+  prometheus:
+    container_name: scribe-engine-prometheus
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+    networks:
+      - scribe-network
+
+networks:
+  scribe-network:
+    driver: bridge
       

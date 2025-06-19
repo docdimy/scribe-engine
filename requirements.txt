@@ -35,3 +35,10 @@ httpx
 
 # Retry logic
 tenacity
+
+# LLM
+# (add LLM client libraries here if needed)
+
+# Utilities
+librosa
+soundfile

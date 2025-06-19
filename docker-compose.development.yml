@@ -2,28 +2,33 @@ version: '3.8'
 
 services:
   scribe-engine:
-    container_name: scribe-engine-dev
     build:
       context: .
       dockerfile: Dockerfile
+    image: scribe-engine:dev
+    container_name: scribe-engine-dev
     ports:
       - "3001:3001"
     volumes:
-      - .:/app
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3001", "--reload"]
-    env_file:
-      - .env
+      - ./app:/app/app
+      - ./logs:/app/logs
+      - ./audio_files:/app/audio_files
+    environment:
+      - ENVIRONMENT=development
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
     restart: unless-stopped
-
-  redis:
-    container_name: scribe-engine-redis
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    networks:
+      - scribe-network
 
   prometheus:
     container_name: scribe-engine-prometheus
@@ -33,3 +38,9 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
+    networks:
+      - scribe-network
+
+networks:
+  scribe-network:
+    driver: bridge
