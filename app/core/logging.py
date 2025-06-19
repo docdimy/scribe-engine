@@ -104,6 +104,27 @@ class AuditLogger:
             **kwargs
         )
     
+    def log_transcription_request(
+        self,
+        request_id: str,
+        provider: str,
+        model: str,
+        diarization: bool,
+        language: str,
+        **kwargs
+    ):
+        """Logs STT transcription requests"""
+        self.logger.info(
+            "transcription_request",
+            request_id=request_id,
+            provider=provider,
+            model=model,
+            diarization=diarization,
+            language=language,
+            timestamp=datetime.utcnow().isoformat(),
+            **kwargs
+        )
+    
     def log_external_api_call(
         self,
         request_id: str,

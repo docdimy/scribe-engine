@@ -8,17 +8,22 @@ services:
     image: scribe-engine:dev
     container_name: scribe-engine-dev
     ports:
-      - "3001:3001"
+      - "3002:3001"
     volumes:
       - ./app:/app/app
       - ./logs:/app/logs
       - ./audio_files:/app/audio_files
     environment:
       - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
       - API_SECRET_KEY=${API_SECRET_KEY}
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
+      - RATE_LIMIT_REQUESTS=10
+      - MAX_AUDIO_DURATION=600
+      - LLM_MAX_TOKENS=2000
+      - MAX_FILE_SIZE_MB=50
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
@@ -29,11 +34,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2.0'
-        reservations:
           memory: 1G
           cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
     networks:
       - scribe-network
 

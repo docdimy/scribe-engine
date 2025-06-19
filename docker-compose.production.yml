@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   scribe-engine:
-    image: dietmarw/scribe-engine:latest
+    image: ghcr.io/docdimy/scribe-engine:latest
     container_name: scribe-engine-api
     ports:
       - "3001:3001"
@@ -11,9 +11,10 @@ services:
       - ./audio_files:/app/audio_files
     environment:
       - ENVIRONMENT=production
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
-      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]

@@ -163,6 +163,7 @@ class STTService:
 
     async def transcribe(
         self,
+        request_id: str,
         file_path: str,
         stt_provider: str,
         stt_model: str,
@@ -173,7 +174,13 @@ class STTService:
         """
         Routes the transcription request to the appropriate provider and model.
         """
-        audit_logger.info(f"AUDIT - New transcription request for provider '{stt_provider}' with model '{stt_model}'")
+        audit_logger.log_transcription_request(
+            request_id=request_id,
+            provider=stt_provider,
+            model=stt_model,
+            diarization=diarization,
+            language=language
+        )
 
         if stt_provider == "openai":
             return await self._transcribe_with_openai(file_path, language, stt_model, stt_prompt)

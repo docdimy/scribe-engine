@@ -337,6 +337,7 @@ async def transcribe_audio(
         # 3. Transcribe audio
         logger.info(f"Starting transcription with {stt_provider}, language: {language}, diarization: {diarization}")
         transcript = await stt_service.transcribe(
+            request_id=request_id,
             file_path=processed_audio_path,
             stt_provider=stt_provider,
             stt_model=stt_model,
