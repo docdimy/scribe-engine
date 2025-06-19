@@ -25,7 +25,6 @@ except ImportError:
     AssemblyAIError = Exception
 
 from app.config import settings
-from app.models.requests import TranscriptionRequest
 from app.models.responses import TranscriptSegment, TranscriptionResult
 from app.core.logging import get_logger, audit_logger
 from app.core.security import data_encryption
@@ -57,7 +56,9 @@ class STTService:
         retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
         before_sleep=lambda retry_state: logger.warning(f"Retrying STT API call, attempt {retry_state.attempt_number}...")
     )
-    async def _transcribe_with_openai(self, file_path: str, request: TranscriptionRequest) -> TranscriptionResult:
+    async def _transcribe_with_openai(
+        self, file_path: str, language: str, stt_model: str, stt_prompt: Optional[str]
+    ) -> TranscriptionResult:
         """Transcribes audio using OpenAI's Whisper API after decrypting."""
         logger.info(f"Starting transcription with OpenAI for file: {file_path}")
         decrypted_audio = None
@@ -75,11 +76,11 @@ class STTService:
             audio_file.name = "audio.webm" 
 
             transcript = await openai_client.audio.transcriptions.create(
-                model=request.stt_model,
+                model=stt_model,
                 file=audio_file,
                 response_format="verbose_json",
-                language=request.language if request.language != "auto" else None,
-                prompt=request.stt_prompt
+                language=language if language != "auto" else None,
+                prompt=stt_prompt
             )
 
             segments = [
@@ -90,7 +91,7 @@ class STTService:
             result = TranscriptionResult(
                 text=transcript.text, 
                 segments=segments,
-                language_detected=getattr(transcript, 'language', request.language)
+                language_detected=getattr(transcript, 'language', language)
             )
             logger.info(f"OpenAI transcription successful: {len(transcript.text)} characters")
             return result
@@ -108,7 +109,9 @@ class STTService:
         retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
         before_sleep=lambda retry_state: logger.warning(f"Retrying STT API call, attempt {retry_state.attempt_number}...")
     )
-    async def _transcribe_with_assemblyai(self, file_path: str, request: TranscriptionRequest) -> TranscriptionResult:
+    async def _transcribe_with_assemblyai(
+        self, file_path: str, diarization: bool, language: str
+    ) -> TranscriptionResult:
         """Transcribes audio using AssemblyAI's API after decrypting."""
         logger.info(f"Starting transcription with AssemblyAI for file: {file_path}")
         decrypted_audio = None
@@ -121,8 +124,8 @@ class STTService:
             logger.info("Audio data successfully decrypted.")
             
             config = aai.TranscriptionConfig(
-                speaker_labels=request.diarization,
-                language_code=request.language if request.language != "auto" else None,
+                speaker_labels=diarization,
+                language_code=language if language != "auto" else None,
             )
             transcriber = aai.Transcriber(config=config)
             
@@ -132,7 +135,7 @@ class STTService:
             if transcript.status == aai.TranscriptStatus.error:
                 raise AssemblyAIError(f"AssemblyAI transcription failed: {transcript.error}")
 
-            if request.diarization and transcript.utterances:
+            if diarization and transcript.utterances:
                  segments = [
                     TranscriptSegment(start=utt.start/1000.0, end=utt.end/1000.0, text=utt.text, speaker=utt.speaker)
                     for utt in transcript.utterances
@@ -146,7 +149,7 @@ class STTService:
             result = TranscriptionResult(
                 text=transcript.text,
                 segments=segments,
-                language_detected=transcript.language_code if transcript.language_code else request.language
+                language_detected=transcript.language_code if transcript.language_code else language
             )
             logger.info(f"AssemblyAI transcription successful: {len(transcript.text)} characters")
             return result
@@ -158,24 +161,30 @@ class STTService:
                 data_encryption.secure_delete(decrypted_audio)
             self._delete_temp_file(file_path)
 
-    async def transcribe(self, file_path: str, request: TranscriptionRequest) -> TranscriptionResult:
+    async def transcribe(
+        self,
+        file_path: str,
+        stt_provider: str,
+        stt_model: str,
+        diarization: bool,
+        language: str,
+        stt_prompt: Optional[str],
+    ) -> TranscriptionResult:
         """
         Routes the transcription request to the appropriate provider and model.
         """
-        provider = request.stt_provider
-        
-        audit_logger.info(f"AUDIT - New transcription request for provider '{provider}' with model '{request.stt_model}'")
+        audit_logger.info(f"AUDIT - New transcription request for provider '{stt_provider}' with model '{stt_model}'")
 
-        if provider == "openai":
-            return await self._transcribe_with_openai(file_path, request)
-        elif provider == "assemblyai":
+        if stt_provider == "openai":
+            return await self._transcribe_with_openai(file_path, language, stt_model, stt_prompt)
+        elif stt_provider == "assemblyai":
             if not settings.assemblyai_api_key:
                 raise ValueError("AssemblyAI API key is not configured.")
-            return await self._transcribe_with_assemblyai(file_path, request)
+            return await self._transcribe_with_assemblyai(file_path, diarization, language)
         else:
             # This part is for a potential local model. Not implemented.
-            logger.error(f"Unsupported STT provider: {provider}")
-            raise ValueError(f"Unsupported STT provider: {provider}")
+            logger.error(f"Unsupported STT provider: {stt_provider}")
+            raise ValueError(f"Unsupported STT provider: {stt_provider}")
 
     def get_available_models(self) -> dict:
         """Returns a dictionary of available models per provider."""

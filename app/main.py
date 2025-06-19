@@ -327,37 +327,47 @@ async def transcribe_audio(
         
         # 1. Process audio file
         with audio_processing_duration.time():
-            processed_audio_path, duration, _ = await audio_processor.process_and_save_audio(
+            processed_audio_path = await audio_processor.process_and_save_audio(
                 file=audio_file, 
-                max_duration=settings.max_audio_duration, 
-                max_size_mb=settings.max_file_size_mb,
-                supported_types=settings.supported_audio_types
+                specialty=specialty
             )
         
-        logger.info(f"Request {request_id}: Audio processed in {time.time() - start_time:.2f}s. Duration: {duration:.2f}s")
+        processing_start_time = time.time()
+        logger.info(f"Request {request_id}: Audio processed and saved to {processed_audio_path}")
         
-        # 2. Transcribe audio
-        logger.info(f"Starting transcription, language: {language}, diarization: {diarization}")
+        # 2. Determine STT provider and model
+        if diarization:
+            stt_provider = "assemblyai"
+            stt_model = STTModel.ASSEMBLYAI_UNIVERSAL.value
+        else:
+            stt_provider = "openai"
+            stt_model = STTModel.GPT_4O_MINI_TRANSCRIBE.value
+
+        # 3. Transcribe audio
+        logger.info(f"Starting transcription with {stt_provider}, language: {language}, diarization: {diarization}")
         transcript = await stt_service.transcribe(
             file_path=processed_audio_path,
+            stt_provider=stt_provider,
+            stt_model=stt_model,
             language=language,
-            diarization=diarization
+            diarization=diarization,
+            stt_prompt=None  # Placeholder for future implementation
         )
         
         # Set output language to detected language if not provided
         final_output_language = output_language or transcript.language_detected or "en"
 
-        # 3. Analyze transcript with LLM
+        # 4. Analyze transcript with LLM
         logger.info(f"Request {request_id}: Starting LLM analysis with model: {model} -> output lang: {final_output_language}")
         analysis = await llm_service.analyze(
-            transcript=transcript.full_text,
-            model=model,
+            transcript=transcript.text,
+            model=model.value, # Pass the enum value
             specialty=specialty,
             conversation_type=conversation_type,
             output_language=final_output_language
         )
         
-        # 4. Handle different output formats
+        # 5. Handle different output formats
         fhir_bundle = None
         xml_content = None
         
@@ -369,27 +379,28 @@ async def transcribe_audio(
                 request_id=request_id,
                 specialty=specialty,
                 conversation_type=conversation_type,
-                bundle_type=fhir_bundle_type or FHIRBundleType.DOCUMENT # Default to document
+                bundle_type=(fhir_bundle_type.value if fhir_bundle_type else FHIRBundleType.DOCUMENT.value)
             )
         elif output_format == OutputFormat.XML:
             xml_content = _create_xml_output(transcript, analysis)
             
-        # 5. Clean up temporary file
+        # 6. Clean up temporary file
         background_tasks.add_task(audio_processor.cleanup, processed_audio_path)
         
-        # 6. Create final response
+        # 7. Create final response
         processing_time_ms = int((time.time() - start_time) * 1000)
         
-        return ScribeResponse(
+        response_data = ScribeResponse(
             request_id=request_id,
             timestamp=datetime.utcnow(),
             transcript=transcript,
             analysis=analysis,
-            output_format=output_format,
+            output_format=output_format.value,
             processing_time_ms=processing_time_ms,
             fhir_bundle=fhir_bundle,
             xml_content=xml_content,
         )
+        return response_data
 
     except AuthenticationError as e:
         logger.warning(f"Request {request_id} failed authentication: {e}")
@@ -420,17 +431,15 @@ def _create_xml_output(transcript: TranscriptionResult, analysis: AnalysisResult
     xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <medical_consultation>
     <transcript>
-        <full_text><![CDATA[{transcript.full_text}]]></full_text>
+        <full_text><![CDATA[{transcript.text}]]></full_text>
         <language>{transcript.language_detected or 'unknown'}</language>
-        <confidence>{transcript.confidence or 0}</confidence>
         <segments>
             {"".join([
                 f"<segment>"
                 f"<text><![CDATA[{seg.text}]]></text>"
-                f"<start_time>{seg.start_time or 0}</start_time>"
-                f"<end_time>{seg.end_time or 0}</end_time>"
-                f"<speaker>{seg.speaker or 'unknown'}</speaker>"
-                f"<confidence>{seg.confidence or 0}</confidence>"
+                f"<start>{seg.start}</start>"
+                f"<end>{seg.end}</end>"
+                f"<speaker>{seg.speaker or 'U'}</speaker>"
                 f"</segment>"
                 for seg in transcript.segments
             ])}
@@ -467,7 +476,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content=response.dict(),
+        content=response.model_dump(),
         headers={"Retry-After": str(int(exc.retry_after))}
     )
 

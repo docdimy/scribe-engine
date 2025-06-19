@@ -94,18 +94,6 @@ A successful response should look like this:
 {"status":"healthy","timestamp":"...","version":"1.0.0","uptime_seconds":...}
 ```
 
-## 🌐 Production Deployment
-
-For a production environment, it is **critical** to not expose the service directly to the internet. Instead, a **reverse proxy** (like Nginx, Traefik, or a cloud load balancer) should be used.
-
-### Key Responsibilities of a Reverse Proxy:
-
-- **TLS Termination (HTTPS):** The proxy handles incoming HTTPS traffic, decrypts it, and forwards it to the Scribe Engine service over the internal Docker network. This ensures secure "Encryption-in-Transit" between the client and the server.
-- **Load Balancing:** If you run multiple instances of the service, the proxy can distribute traffic among them.
-- **Security:** It can provide an additional layer of security, handling things like rate limiting, IP whitelisting, and protection against common web vulnerabilities.
-
-The provided `docker-compose.production.yml` is designed to be used behind such a proxy. It does not expose any ports to the host machine, assuming the proxy will connect to it via a shared Docker network.
-
 ## 📋 API Documentation
 
 The API is documented via OpenAPI and can be explored at `http://localhost:3001/docs` when running in development mode.
@@ -192,10 +180,15 @@ The service can generate fully FHIR R4-compliant bundles. Depending on the `fhir
 
 ### Supported Audio Formats
 
-- MP3 (`audio/mpeg`)
-- WAV (`audio/wav`)
-- MP4/M4A (`audio/mp4`)
-- OGG (`audio/ogg`)
+The API is designed to be flexible and accepts a wide range of common audio formats. For best results regarding upload speed and processing efficiency, the **`Ogg/Opus`** format is recommended, as it offers excellent quality at a low file size.
+
+The following MIME types and their corresponding file extensions are supported:
+
+- **`audio/ogg`** (Recommended, typically `.ogg` or `.opus`)
+- `audio/webm` (Typically `.webm`)
+- `audio/mpeg` (Typically `.mp3`)
+- `audio/wav` (Typically `.wav`)
+- `audio/mp4` (Typically `.mp4`, `.m4a`)
 
 ### Languages
 
@@ -216,7 +209,8 @@ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." ...
 ### Data Protection
 
 - **Encryption-at-Rest:** All audio data is encrypted using a strong symmetric key (`Fernet`) before it is temporarily written to disk. The data is only decrypted in memory for processing and is immediately deleted afterwards.
-- **Encryption-in-Transit:** Communication with external APIs (OpenAI, AssemblyAI) is done exclusively over HTTPS. For client-to-server communication, TLS termination must be handled by a reverse proxy in production (see "Production Deployment" section).
+- **Encryption-in-Transit:** Communication with all external APIs (OpenAI, AssemblyAI) is performed exclusively over HTTPS. For client-server communication, it is strongly recommended to use a reverse proxy that handles TLS termination in production.
+- **Hardened HTTP Headers:** The application sends security headers like `Strict-Transport-Security` (HSTS), `Content-Security-Policy` (CSP), and `X-Content-Type-Options` to protect against common web vulnerabilities like clickjacking and cross-site scripting (XSS).
 - **Automatic Deletion:** All temporary files and in-memory data related to a request are securely deleted immediately after processing is complete.
 - **Audit Logging** of all API access
 - **GDPR compliant** with data flow documentation
@@ -245,62 +239,9 @@ To ensure the service is running and ready to accept traffic, two health check e
 - `/health`: A simple check to confirm the service process is running.
 - `/ready`: A more detailed check that can be extended to verify connections to downstream dependencies (like OpenAI, Redis, etc.).
 
-## 🧪 Testing
+## 📝 Project Plan
 
-*This section outlines the planned testing strategy. The test files themselves have not yet been implemented.*
-
-A robust testing suite is planned to ensure reliability and maintainability. Tests will be organized into unit and integration tests using `pytest`.
-
-```bash
-# Planned command for running unit tests
-# python -m pytest tests/unit/
-
-# Planned command for running integration tests
-# python -m pytest tests/integration/
-
-# Planned command for running all tests
-# python -m pytest
-```
-
-## 📦 Deployment
-
-### Production Docker
-
-```dockerfile
-# Multi-stage build for smaller images
-# Non-root user for security
-# Health checks for container orchestration
-```
-
-### Kubernetes
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: scribe-engine
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: scribe-engine
-  template:
-    metadata:
-      labels:
-        app: scribe-engine
-    spec:
-      containers:
-      - name: scribe-engine
-        image: scribe-engine:latest
-        ports:
-        - containerPort: 3001
-        env:
-        - name: OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: openai-key
-```
+Further development steps, feature ideas and the overall roadmap are documented in the `projectplan.md` file in this repository.
 
 ## 🐛 Troubleshooting
 
