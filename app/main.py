@@ -9,8 +9,10 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import asyncio
 import httpx
+import os
+import json
 
-from fastapi import FastAPI, HTTPException, Request, Depends, status, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Depends, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -30,7 +32,7 @@ from app.models.responses import (
     RateLimitResponse, TranscriptionResult, AnalysisResult
 )
 from app.services.audio_processor import AudioProcessor
-from app.services.stt_service import STTService
+from app.services.stt_service import STTService, process_and_save_audio
 from app.services.llm_service import LLMService
 from app.services.fhir_service import FHIRService
 
@@ -162,8 +164,9 @@ async def track_requests(request: Request, call_next):
     start_time = time.time()
     request_id = security_manager.generate_request_id()
     
-    # Add request ID to headers
+    # Add request ID and start time to state
     request.state.request_id = request_id
+    request.state.start_time = start_time
     
     try:
         response = await call_next(request)
@@ -285,173 +288,143 @@ async def metrics():
 @limiter.limit(f"{settings.rate_limit_requests}/minute")
 async def transcribe_audio(
     request: Request,
-    audio_file: UploadFile = File(..., alias="file"),
     user_info: dict = Depends(get_current_user),
-    # Use Enums for automatic validation
-    output_format: OutputFormat = OutputFormat.JSON,
-    model: ModelName = ModelName.GPT_4_1_NANO,
-    # Optional parameters with validation
-    diarization: bool = False,
-    specialty: str = "general",
-    conversation_type: str = "consultation",
-    language: str = "auto",
-    output_language: Optional[str] = None,
-    fhir_bundle_type: Optional[FHIRBundleType] = None,
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    audio_file: UploadFile = File(..., alias="file"),
+    # Form fields
+    output_format: OutputFormat = Form(OutputFormat.JSON),
+    model: ModelName = Form(ModelName.GPT_4O_MINI),
+    diarization: bool = Form(False),
+    specialty: str = Form("general"),
+    conversation_type: str = Form("consultation"),
+    language: str = Form("auto"),
+    output_language: Optional[str] = Form(None),
+    fhir_bundle_type: Optional[FHIRBundleType] = Form(None)
 ):
     """
-    Transcribe and analyze audio data
+    Main endpoint for audio transcription, analysis, and formatting.
     """
-    
-    start_time = time.time()
     request_id = request.state.request_id
-    
-    # Validate parameter combination
-    if fhir_bundle_type and output_format != OutputFormat.FHIR:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The 'fhir_bundle_type' parameter is only applicable when 'output_format' is 'fhir'."
-        )
-    
-    processed_audio_path = None
+    start_time = request.state.start_time
+    logger.info(f"Request {request_id}: New transcription request from user {user_info.get('sub')}")
+
+    temp_audio_file = None
     try:
-        logger.info(f"Request {request_id} authenticated for user: {user_info.get('sub', 'unknown')}")
-        
-        # 1. Process audio file
-        with audio_processing_duration.time():
-            processed_audio_path = await audio_processor.process_and_save_audio(
-                file=audio_file, 
-                specialty=specialty
-            )
-        
-        logger.info(f"Request {request_id}: Audio processed and saved to {processed_audio_path}")
-        
-        # 2. Determine STT provider and model
+        # Determine STT provider and model based on diarization
         if diarization:
             stt_provider = "assemblyai"
             stt_model = STTModel.ASSEMBLYAI_UNIVERSAL.value
         else:
             stt_provider = "openai"
-            stt_model = STTModel.GPT_4O_MINI_TRANSCRIBE.value
+            stt_model = STTModel.WHISPER_1.value
 
-        # 3. Transcribe audio
-        logger.info(f"Starting transcription with {stt_provider}, language: {language}, diarization: {diarization}")
+        # Step 1: Process and save audio securely
+        temp_audio_file = await process_and_save_audio(audio_file, specialty)
+
+        # Step 2: Transcribe the audio
+        logger.info(f"Request {request_id}: Starting transcription with {stt_provider}")
         transcript = await stt_service.transcribe(
             request_id=request_id,
-            file_path=processed_audio_path,
+            file_path=temp_audio_file.name,
             stt_provider=stt_provider,
             stt_model=stt_model,
-            language=language,
             diarization=diarization,
-            stt_prompt=None  # Placeholder for future implementation
+            language=language,
+            stt_prompt=f"Specialty: {specialty}, Conversation: {conversation_type}"
         )
-        
-        # Set output language to detected language if not provided
-        final_output_language = output_language or transcript.language_detected or "en"
+        logger.info(f"Request {request_id}: Transcription successful.")
 
-        # 4. Analyze transcript with LLM
-        logger.info(f"Request {request_id}: Starting LLM analysis with model: {model} -> output lang: {final_output_language}")
+        # Step 3: Analyze the transcript
+        logger.info(f"Request {request_id}: Starting analysis with LLM.")
         analysis = await llm_service.analyze(
-            transcript=transcript.text,
+            transcript=transcript.full_text,
             model=model.value,
             specialty=specialty,
             conversation_type=conversation_type,
-            output_language=final_output_language
+            output_language=output_language or transcript.language_detected or "en"
         )
         
-        # 5. Handle different output formats
+        logger.info(f"Request {request_id}: LLM analysis completed successfully.")
+
+        # Step 4: Format the output
         fhir_bundle = None
-        xml_content = None
-        
         if output_format == OutputFormat.FHIR:
-            logger.info(f"Request {request_id}: Generating FHIR bundle")
             fhir_bundle = await fhir_service.create_fhir_bundle(
-                transcript=transcript,
-                analysis=analysis,
                 request_id=request_id,
+                transcript=transcript, 
+                analysis=analysis,
                 specialty=specialty,
                 conversation_type=conversation_type,
-                bundle_type=(fhir_bundle_type.value if fhir_bundle_type else FHIRBundleType.DOCUMENT.value)
+                bundle_type=fhir_bundle_type
             )
-        elif output_format == OutputFormat.XML:
-            xml_content = _create_xml_output(transcript, analysis)
-            
-        # 6. Clean up temporary file
-        background_tasks.add_task(audio_processor.cleanup, processed_audio_path)
-        
-        # 7. Create final response
+            logger.info(f"Request {request_id}: Analysis formatted to FHIR.")
+
+        # Step 5: Create final response
         processing_time_ms = int((time.time() - start_time) * 1000)
-        
+
         response_data = ScribeResponse(
             request_id=request_id,
             timestamp=datetime.utcnow(),
             transcript=transcript,
             analysis=analysis,
             output_format=output_format,
-            processing_time_ms=processing_time_ms,
-            fhir_bundle=fhir_bundle,
-            xml_content=xml_content,
+            processing_time_ms=processing_time_ms
         )
-        return response_data
 
-    except AuthenticationError as e:
-        logger.warning(f"Request {request_id} failed authentication: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        if output_format == OutputFormat.FHIR:
+            response_data.fhir_bundle = fhir_bundle
+            # Use model_dump_json to handle complex nested models like FHIR resources
+            # Then load it back to a dict for JSONResponse to handle correctly.
+            return JSONResponse(content=json.loads(response_data.model_dump_json(exclude_none=True)))
+        elif output_format == OutputFormat.XML:
+            xml_content = _create_xml_output(request_id, transcript, analysis)
+            response_data.xml_content = xml_content
+            return PlainTextResponse(content=xml_content, media_type="application/xml")
+
+        return response_data
         
     except HTTPException:
-        # Re-raise HTTP exceptions from services (e.g., audio validation)
         raise
-        
     except Exception as e:
         logger.error(f"Request {request_id} failed with an unexpected error: {e}", exc_info=True)
-        # Clean up in case of failure
-        if processed_audio_path:
-            # Use background task for cleanup here as well to avoid blocking
-            background_tasks.add_task(audio_processor.cleanup, processed_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An internal server error occurred during transcription."
+            detail="An unexpected internal error occurred.",
         )
+    finally:
+        if temp_audio_file:
+            try:
+                temp_audio_file.close()
+                os.remove(temp_audio_file.name)
+                logger.info(f"Request {request_id}: Cleaned up temporary file {temp_audio_file.name}")
+            except Exception as e:
+                logger.error(f"Request {request_id}: Failed to cleanup temporary file {temp_audio_file.name}: {e}", exc_info=True)
 
 
-def _create_xml_output(transcript: TranscriptionResult, analysis: AnalysisResult) -> str:
+def _create_xml_output(request_id: str, transcript: TranscriptionResult, analysis: AnalysisResult) -> str:
     """Create XML output for transcript and analysis"""
     
-    xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<medical_consultation>
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<ScribeResult>
+    <request_id>{request_id}</request_id>
     <transcript>
-        <full_text><![CDATA[{transcript.text}]]></full_text>
-        <language>{transcript.language_detected or 'unknown'}</language>
+        <full_text><![CDATA[{transcript.full_text}]]></full_text>
         <segments>
-            {"".join([
-                f"<segment>"
-                f"<text><![CDATA[{seg.text}]]></text>"
-                f"<start>{seg.start}</start>"
-                f"<end>{seg.end}</end>"
-                f"<speaker>{seg.speaker or 'U'}</speaker>"
-                f"</segment>"
-                for seg in transcript.segments
-            ])}
+            {"".join(f'<segment speaker="{s.speaker or ""}"><start>{s.start_time}</start><end>{s.end_time}</end><text><![CDATA[{s.text}]]></text></segment>' for s in transcript.segments)}
         </segments>
     </transcript>
     <analysis>
         <summary><![CDATA[{analysis.summary}]]></summary>
-        <diagnosis><![CDATA[{analysis.diagnosis or ''}]]></diagnosis>
-        <treatment><![CDATA[{analysis.treatment or ''}]]></treatment>
-        <medication><![CDATA[{analysis.medication or ''}]]></medication>
-        <follow_up><![CDATA[{analysis.follow_up or ''}]]></follow_up>
-        <specialty_notes><![CDATA[{analysis.specialty_notes or ''}]]></specialty_notes>
+        <diagnosis><![CDATA[{analysis.diagnosis}]]></diagnosis>
+        <treatment><![CDATA[{analysis.treatment}]]></treatment>
+        <medication><![CDATA[{analysis.medication}]]></medication>
+        <follow_up><![CDATA[{analysis.follow_up}]]></follow_up>
+        <specialty_notes><![CDATA[{analysis.specialty_notes}]]></specialty_notes>
         <icd10_codes>
-            {"".join([f"<code>{code}</code>" for code in (analysis.icd10_codes or [])])}
+            {"".join(f'<code>{code}</code>' for code in analysis.icd10_codes or [])}
         </icd10_codes>
     </analysis>
-</medical_consultation>"""
-    
-    return xml_content
+</ScribeResult>
+"""
 
 
 # Override rate limit handler

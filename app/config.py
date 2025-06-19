@@ -32,8 +32,8 @@ class ModelName(str, Enum):
 
 
 class STTModel(str, Enum):
-    GPT_4O_MINI_TRANSCRIBE = "gpt-4o-mini-transcribe"
     ASSEMBLYAI_UNIVERSAL = "assemblyai-universal"
+    WHISPER_1 = "whisper-1"
     # Future: Local Whisper with custom speaker diarization
     LOCAL_WHISPER = "local-whisper"  # For future implementation
 

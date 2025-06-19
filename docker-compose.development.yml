@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  scribe-engine:
+  scribe-engine-develop:
     build:
       context: .
       dockerfile: Dockerfile
-    image: scribe-engine:dev
-    container_name: scribe-engine-dev
+    image: scribe-engine:develop
+    container_name: scribe-engine-develop
     ports:
       - "3002:3001"
     volumes:
@@ -15,7 +15,7 @@ services:
       - ./audio_files:/app/audio_files
     environment:
       - ENVIRONMENT=development
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
       - API_SECRET_KEY=${API_SECRET_KEY}
@@ -35,21 +35,9 @@ services:
       resources:
         limits:
           memory: 1G
-          cpus: '1.0'
         reservations:
           memory: 512M
-          cpus: '0.5'
-    networks:
-      - scribe-network
-
-  prometheus:
-    container_name: scribe-engine-prometheus
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
+          
     networks:
       - scribe-network
 

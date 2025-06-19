@@ -42,14 +42,6 @@ RETRYABLE_EXCEPTIONS = (httpx.TimeoutException, httpx.NetworkError, openai.RateL
 class STTService:
     """Service for Speech-to-Text transcription."""
 
-    def _delete_temp_file(self, file_path: str):
-        """Safely deletes a temporary file."""
-        try:
-            os.remove(file_path)
-            logger.info(f"Successfully deleted temporary file: {file_path}")
-        except OSError as e:
-            logger.error(f"Error deleting temporary file {file_path}: {e}")
-
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
@@ -71,8 +63,6 @@ class STTService:
             logger.info("Audio data successfully decrypted.")
 
             audio_file = io.BytesIO(decrypted_audio)
-            # Provide a filename for the API, helps with format detection.
-            # The actual format is determined by the bytes, but filename is good practice.
             audio_file.name = "audio.webm" 
 
             transcript = await openai_client.audio.transcriptions.create(
@@ -84,12 +74,12 @@ class STTService:
             )
 
             segments = [
-                TranscriptSegment(start=seg['start'], end=seg['end'], text=seg['text'])
+                TranscriptSegment(start=seg.start, end=seg.end, text=seg.text)
                 for seg in transcript.segments
             ]
             
             result = TranscriptionResult(
-                text=transcript.text, 
+                full_text=transcript.text, 
                 segments=segments,
                 language_detected=getattr(transcript, 'language', language)
             )
@@ -101,7 +91,6 @@ class STTService:
         finally:
             if decrypted_audio:
                 data_encryption.secure_delete(decrypted_audio)
-            self._delete_temp_file(file_path)
     
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -129,7 +118,6 @@ class STTService:
             )
             transcriber = aai.Transcriber(config=config)
             
-            # AssemblyAI SDK can take raw bytes
             transcript = transcriber.transcribe(decrypted_audio)
 
             if transcript.status == aai.TranscriptStatus.error:
@@ -147,9 +135,9 @@ class STTService:
                 ]
 
             result = TranscriptionResult(
-                text=transcript.text,
+                full_text=transcript.text,
                 segments=segments,
-                language_detected=transcript.language_code if transcript.language_code else language
+                language_detected=getattr(transcript, 'language_code', language)
             )
             logger.info(f"AssemblyAI transcription successful: {len(transcript.text)} characters")
             return result
@@ -159,7 +147,6 @@ class STTService:
         finally:
             if decrypted_audio:
                 data_encryption.secure_delete(decrypted_audio)
-            self._delete_temp_file(file_path)
 
     async def transcribe(
         self,
@@ -174,24 +161,27 @@ class STTService:
         """
         Routes the transcription request to the appropriate provider and model.
         """
-        audit_logger.log_transcription_request(
-            request_id=request_id,
-            provider=stt_provider,
-            model=stt_model,
-            diarization=diarization,
-            language=language
-        )
+        try:
+            audit_logger.log_transcription_request(
+                request_id=request_id,
+                provider=stt_provider,
+                model=stt_model,
+                diarization=diarization,
+                language=language
+            )
 
-        if stt_provider == "openai":
-            return await self._transcribe_with_openai(file_path, language, stt_model, stt_prompt)
-        elif stt_provider == "assemblyai":
-            if not settings.assemblyai_api_key:
-                raise ValueError("AssemblyAI API key is not configured.")
-            return await self._transcribe_with_assemblyai(file_path, diarization, language)
-        else:
-            # This part is for a potential local model. Not implemented.
-            logger.error(f"Unsupported STT provider: {stt_provider}")
-            raise ValueError(f"Unsupported STT provider: {stt_provider}")
+            if stt_provider == "openai":
+                return await self._transcribe_with_openai(file_path, language, stt_model, stt_prompt)
+            elif stt_provider == "assemblyai":
+                if not settings.assemblyai_api_key:
+                    raise ValueError("AssemblyAI API key is not configured.")
+                return await self._transcribe_with_assemblyai(file_path, diarization, language)
+            else:
+                logger.error(f"Unsupported STT provider: {stt_provider}")
+                raise ValueError(f"Unsupported STT provider: {stt_provider}")
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}", exc_info=True)
+            raise
 
     def get_available_models(self) -> dict:
         """Returns a dictionary of available models per provider."""
@@ -200,50 +190,46 @@ class STTService:
             "assemblyai": ["default"], 
         }
 
-async def process_and_save_audio(file: UploadFile, specialty: str) -> str:
+async def process_and_save_audio(file: UploadFile, specialty: str) -> NamedTemporaryFile:
     """
-    Processes the uploaded audio file and saves it temporarily.
+    Processes the uploaded audio file and saves it to a temporary file.
     - Validates audio format and content.
     - Encrypts the audio data before saving.
-    - Returns the path to the encrypted temporary file.
+    - Returns the open NamedTemporaryFile object.
     """
     logger.info("Starting audio processing...")
 
-    # Validate file type
     if file.content_type not in settings.supported_audio_formats:
-        logger.warning(
-            f"Unsupported audio format: {file.content_type}. Supported: {settings.supported_audio_formats}"
-        )
+        logger.warning(f"Unsupported audio format: {file.content_type}")
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported audio format: {file.content_type}. Please use one of {settings.supported_audio_formats}",
+            detail=f"Unsupported audio format: {file.content_type}",
         )
-
+    
+    temp_file = None
     try:
         audio_data = await file.read()
         if not audio_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No audio data received.",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No audio data.")
 
         logger.info(f"Received {len(audio_data)} bytes of audio data.")
 
-        # --- Encryption Step ---
         logger.info("Encrypting audio data for secure storage.")
         encrypted_data = data_encryption.encrypt_data(audio_data)
         logger.info("Audio data successfully encrypted.")
 
-
-        # Create a temporary file to store the encrypted audio
-        with NamedTemporaryFile(delete=False, suffix=".enc") as temp_file:
-            temp_file.write(encrypted_data)
-            temp_file_path = temp_file.name
-            logger.info(f"Encrypted audio saved temporarily to {temp_file_path}")
-
-        return temp_file_path
+        temp_file = NamedTemporaryFile(delete=False, suffix=".enc")
+        temp_file.write(encrypted_data)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+        logger.info(f"Encrypted audio saved temporarily to {temp_file.name}")
+        
+        return temp_file
 
     except Exception as e:
+        if temp_file:
+            temp_file.close()
+            os.remove(temp_file.name)
         logger.error(f"Error during audio processing: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

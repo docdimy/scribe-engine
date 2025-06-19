@@ -11,6 +11,7 @@ services:
       - ./audio_files:/app/audio_files
     environment:
       - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
       - API_SECRET_KEY=${API_SECRET_KEY}
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
