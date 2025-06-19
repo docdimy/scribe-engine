@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # Audio Processing Limits
     max_audio_duration: int = Field(default=600)  # seconds
     max_file_size_mb: int = Field(default=50)
-    supported_audio_types: List[str] = Field(
+    supported_audio_formats: List[str] = Field(
         default=["audio/mpeg", "audio/wav", "audio/mp4", "audio/m4a", "audio/ogg", "audio/webm"]
     )
     

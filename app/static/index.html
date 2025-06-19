@@ -31,9 +31,10 @@
             background-color: var(--bg-white);
             padding: 1rem 2rem;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 1rem;
+            gap: 0.5rem;
             border-bottom: 1px solid var(--border-color);
         }
         header img { height: 100px; }
@@ -330,40 +331,45 @@
 
             const formData = new FormData();
             formData.append('file', audioBlob, `recording.${fileExtension}`);
+            formData.append('model', modelSelect.value);
+            const outputFormat = outputFormatSelect.value;
+            formData.append('output_format', outputFormat);
+            formData.append('diarization', diarizationCheckbox.checked.toString());
+            formData.append('specialty', specialtyInput.value);
+            formData.append('conversation_type', conversationTypeInput.value);
+            if(languageInput.value) formData.append('language', languageInput.value);
+            if(outputLangInput.value) formData.append('output_language', outputLangInput.value);
+
+            // Only add fhir_bundle_type if the output format is fhir
+            if (outputFormat === 'fhir') {
+                formData.append('fhir_bundle_type', fhirBundleTypeSelect.value);
+            }
+
+            updateStatus('Transkription und Analyse läuft...', 'loading');
+            setProgress(50);
+            const startTime = Date.now();
             
-            const params = {
-                model: modelSelect.value,
-                specialty: specialtyInput.value,
-                conversation_type: conversationTypeInput.value,
-                language: languageInput.value || null,
-                output_language: outputLangInput.value || null,
-                output_format: outputFormatSelect.value,
-                diarization: diarizationCheckbox.checked,
-                fhir_bundle_type: fhirBundleTypeSelect.value
-            };
-
-            const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && v !== ''));
-            const queryString = new URLSearchParams(filteredParams).toString();
-
             const controller = new AbortController();
             const timeoutId = setTimeout(() => {
                 controller.abort();
-                statusDiv.textContent = 'Upload timed out after 30 seconds.';
-            }, 30000);
+                updateStatus('Fehler: Zeitüberschreitung bei der Anfrage.', 'error');
+                setProgress(0, true);
+            }, 30000); // 30-second timeout
 
             try {
-                uploadProgress.removeAttribute('value');
-
-                const response = await fetch(`/v1/transcribe?${queryString}`, {
+                const response = await fetch('/v1/transcribe', {
                     method: 'POST',
-                    headers: { 'X-API-Key': apiKeyInput.value },
+                    headers: {
+                        // Send both for broader compatibility, the backend will pick one
+                        'Authorization': `Bearer ${apiKeyInput.value}`,
+                        'X-API-Key': apiKeyInput.value, 
+                    },
                     body: formData,
-                    signal: controller.signal
+                    signal: controller.signal,
                 });
 
                 clearTimeout(timeoutId);
-                uploadProgress.style.display = 'none';
-                uploadProgress.setAttribute('value', '0');
+                const duration = Date.now() - startTime;
 
                 if (response.ok) {
                     const result = await response.json();
