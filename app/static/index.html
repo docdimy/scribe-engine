@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scribe Engine - API Test Console</title>
+    <title>Scribe Engine - API Development Console</title>
     <link rel="icon" href="/static/scribe-engine.svg" type="image/svg+xml">
     <style>
         :root {
@@ -32,6 +32,7 @@
             padding: 1rem 2rem;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 1rem;
             border-bottom: 1px solid var(--border-color);
         }
@@ -52,10 +53,11 @@
             border-radius: var(--border-radius);
             box-shadow: var(--box-shadow);
             padding: 1.5rem;
+            outline: none;
         }
         h2 { margin-top: 0; font-size: 1.1rem; font-weight: 600; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.75rem; margin-bottom: 1rem;}
         label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.875rem; }
-        input[type="text"], select {
+        input[type="text"], input[type="password"], select {
             width: 100%; padding: 0.5rem 0.75rem;
             border-radius: var(--border-radius); border: 1px solid var(--border-color);
             background-color: var(--bg-light);
@@ -69,15 +71,15 @@
         .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
         .checkbox-group { display: flex; align-items: center; margin-top: 1rem; }
         .checkbox-group input { margin-right: 0.5rem; width: 1rem; height: 1rem; }
-        .controls button {
+        .controls button, .result-header button {
             padding: 0.6rem 1rem; font-size: 1rem; border: none;
             border-radius: var(--border-radius); cursor: pointer;
             background-color: var(--primary-color); color: var(--bg-white);
-            transition: background-color 0.2s; margin-right: 0.75rem;
+            transition: background-color 0.2s;
             font-weight: 500;
         }
-        .controls button:hover:not(:disabled) { background-color: var(--primary-hover); }
-        .controls button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+        .controls button:hover:not(:disabled), .result-header button:hover:not(:disabled) { background-color: var(--primary-hover); }
+        .controls button:disabled, .result-header button:disabled { background-color: #9ca3af; cursor: not-allowed; }
         #status { margin-top: 1rem; font-style: italic; color: var(--text-muted); }
         .warning, .info {
             padding: 1rem; border-radius: var(--border-radius); margin-bottom: 1.5rem;
@@ -97,12 +99,23 @@
         }
         .copy-btn:hover { background-color: var(--primary-hover); }
         .result-header { display: flex; justify-content: space-between; align-items: center; }
+        #uploadProgress {
+            width: 100%;
+            margin-top: 1rem;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .grid-container {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
     <header>
         <img src="/static/scribe-engine.svg" alt="Logo">
-        <h1>API Test Console</h1>
+        <h1>API Development Console</h1>
     </header>
 
     <main>
@@ -110,16 +123,16 @@
             <strong>Welcome!</strong> This page allows you to test the Scribe Engine API directly from your browser.
         </div>
         <div id="micWarning" class="warning" style="display: none;">
-            <strong>Microphone Access Restricted:</strong> To record audio, please access this page via <code>http://localhost</code> or a secure <code>https://</code> connection.
+            <strong>Microphone Access Restricted:</strong> Your browser may block microphone access on non-secure connections. Please use <code>localhost</code> or an <code>https://</code> connection.
         </div>
 
         <div class="grid-container">
-            <div class="card">
+            <div class="card" tabindex="0">
                 <h2>1. Configure Request</h2>
                 <div class="options-grid">
                     <div>
                         <label for="apiKey">API Key</label>
-                        <input type="text" id="apiKey" value="test_api_key">
+                        <input type="password" id="apiKey" value="test_api_key">
                     </div>
                     <div>
                         <label for="model">LLM Model</label>
@@ -167,19 +180,20 @@
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" tabindex="0">
                 <h2>2. Record & Transcribe</h2>
                 <div class="controls">
-                    <button id="recordButton">Start Recording</button>
-                    <button id="stopButton" disabled>Stop Recording</button>
+                    <button id="recordButton" aria-label="Start audio recording">Start Recording</button>
+                    <button id="stopButton" disabled aria-label="Stop audio recording">Stop Recording</button>
                 </div>
-                <div id="status">Ready to record</div>
+                <div id="status" aria-live="polite">Ready to record</div>
+                <progress id="uploadProgress" value="0" max="100" style="width: 100%; margin-top: 1rem; display: none;"></progress>
             </div>
 
-            <div class="card" style="grid-column: span 2;">
+            <div class="card" style="grid-column: span 2;" tabindex="0">
                 <div class="result-header">
                     <h2>3. API Result</h2>
-                    <button id="copyButton" class="copy-btn">Copy</button>
+                    <button id="copyButton" aria-label="Copy result to clipboard">Copy</button>
                 </div>
                 <pre id="result">No result yet.</pre>
             </div>
@@ -187,14 +201,18 @@
     </main>
 
     <script>
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            window.location.href = 'https:' + window.location.href.substring(window.location.protocol.length);
+        }
+
         const recordButton = document.getElementById('recordButton');
         const stopButton = document.getElementById('stopButton');
         const statusDiv = document.getElementById('status');
         const resultPre = document.getElementById('result');
         const copyButton = document.getElementById('copyButton');
         const micWarningDiv = document.getElementById('micWarning');
+        const uploadProgress = document.getElementById('uploadProgress');
 
-        // Form inputs
         const apiKeyInput = document.getElementById('apiKey');
         const modelSelect = document.getElementById('model');
         const specialtyInput = document.getElementById('specialty');
@@ -208,33 +226,82 @@
 
         let mediaRecorder;
         let audioChunks = [];
+        let streamReference;
 
-        if (!navigator.mediaDevices || !window.isSecureContext) {
+        const isMicrophoneLikelyAvailable = () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                return false;
+            }
+            return window.isSecureContext || ['localhost', '127.0.0.1'].includes(window.location.hostname);
+        }
+
+        if (!isMicrophoneLikelyAvailable()) {
             recordButton.disabled = true;
             micWarningDiv.style.display = 'block';
-            statusDiv.textContent = 'Microphone not available on insecure connections.';
+            statusDiv.textContent = 'Microphone access is disabled in this context.';
         }
 
         outputFormatSelect.addEventListener('change', () => {
             fhirOptions.style.display = outputFormatSelect.value === 'fhir' ? 'block' : 'none';
         });
 
+        const cleanupAudio = () => {
+            if (streamReference) {
+                streamReference.getTracks().forEach(track => track.stop());
+                streamReference = null;
+            }
+            audioChunks = [];
+        };
+
         recordButton.addEventListener('click', async () => {
+            if (!isMicrophoneLikelyAvailable()) {
+                micWarningDiv.style.display = 'block';
+                return;
+            }
             try {
-                // Request mono audio at 16 kHz, which is optimal for most STT services
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+                cleanupAudio();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }});
+                streamReference = stream;
                 audioChunks = [];
-                // Set bitrate to 96 kbps for a good balance of quality and file size
-                mediaRecorder = new MediaRecorder(stream, { audioBitsPerSecond: 96000 });
-                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-                mediaRecorder.onstop = () => sendData(new Blob(audioChunks, { type: 'audio/webm' }));
+
+                const oggMimeType = 'audio/ogg;codecs=opus';
+                const webmIMimeType = 'audio/webm';
+                const mimeType = MediaRecorder.isTypeSupported(oggMimeType) ? oggMimeType : webmIMimeType;
+                const fileExtension = mimeType.startsWith('audio/ogg') ? 'ogg' : 'webm';
+                
+                mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    sendData(audioBlob, fileExtension);
+                    cleanupAudio();
+                };
+
+                mediaRecorder.onerror = (event) => {
+                    console.error('MediaRecorder error:', event.error);
+                    statusDiv.textContent = 'An error occurred during recording.';
+                    cleanupAudio();
+                    recordButton.disabled = false;
+                    stopButton.disabled = true;
+                };
+
                 mediaRecorder.start();
                 recordButton.disabled = true;
                 stopButton.disabled = false;
                 statusDiv.textContent = 'Recording...';
             } catch (err) {
                 console.error('Error accessing microphone:', err);
-                statusDiv.textContent = 'Error: Could not access microphone. Please grant permission.';
+                statusDiv.textContent = `Error: Could not access microphone. ${err.message}`;
                 micWarningDiv.style.display = 'block';
             }
         });
@@ -242,59 +309,84 @@
         stopButton.addEventListener('click', () => {
             if (mediaRecorder?.state === "recording") {
                 mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 recordButton.disabled = false;
                 stopButton.disabled = true;
-                statusDiv.textContent = 'Recording stopped. Sending to API...';
+                statusDiv.textContent = 'Recording stopped. Preparing for upload...';
             }
         });
 
-        async function sendData(audioBlob) {
-            const formData = new FormData();
-            formData.append('audio_file', audioBlob, 'recording.webm');
-            
-            const apiUrl = new URL('/v1/transcribe', window.location.origin);
-            
-            // Append all options from the form
-            apiUrl.searchParams.append('model', modelSelect.value);
-            apiUrl.searchParams.append('specialty', specialtyInput.value);
-            apiUrl.searchParams.append('conversation_type', conversationTypeInput.value);
-            apiUrl.searchParams.append('output_format', outputFormatSelect.value);
-            apiUrl.searchParams.append('diarization', diarizationCheckbox.checked);
-            
-            if (outputFormatSelect.value === 'fhir') {
-                apiUrl.searchParams.append('fhir_bundle_type', fhirBundleTypeSelect.value);
-            }
+        const sendData = async (audioBlob, fileExtension) => {
+            statusDiv.textContent = 'Uploading audio file...';
+            resultPre.textContent = 'Processing...';
+            copyButton.disabled = true;
+            uploadProgress.style.display = 'block';
+            uploadProgress.value = 0;
 
-            if (languageInput.value) apiUrl.searchParams.append('language', languageInput.value);
-            if (outputLangInput.value) apiUrl.searchParams.append('output_language', outputLangInput.value);
+            const formData = new FormData();
+            formData.append('file', audioBlob, `recording.${fileExtension}`);
             
-            resultPre.textContent = "Processing...";
-            
+            const params = {
+                model: modelSelect.value,
+                specialty: specialtyInput.value,
+                conversation_type: conversationTypeInput.value,
+                language: languageInput.value || null,
+                output_language: outputLangInput.value || null,
+                output_format: outputFormatSelect.value,
+                diarization: diarizationCheckbox.checked,
+                fhir_bundle_type: fhirBundleTypeSelect.value
+            };
+
+            const filteredParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && v !== ''));
+            const queryString = new URLSearchParams(filteredParams).toString();
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                controller.abort();
+                statusDiv.textContent = 'Upload timed out after 30 seconds.';
+            }, 30000);
+
             try {
-                const res = await fetch(apiUrl, {
+                uploadProgress.removeAttribute('value');
+
+                const response = await fetch(`/transcribe/?${queryString}`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${apiKeyInput.value}` },
-                    body: formData
+                    headers: { 'X-API-Key': apiKeyInput.value },
+                    body: formData,
+                    signal: controller.signal
                 });
 
-                const result = await res.json();
-                statusDiv.textContent = `API Response: ${res.status} ${res.statusText}`;
-                resultPre.textContent = JSON.stringify(result, null, 2);
+                clearTimeout(timeoutId);
+                uploadProgress.style.display = 'none';
+                uploadProgress.setAttribute('value', '0');
 
+                if (response.ok) {
+                    const result = await response.json();
+                    resultPre.textContent = JSON.stringify(result, null, 2);
+                    statusDiv.textContent = 'Success! Result received.';
+                } else {
+                    const errorText = await response.text();
+                    resultPre.textContent = `API Error: ${response.status} ${response.statusText}\n\n${errorText}`;
+                    statusDiv.textContent = 'An API error occurred.';
+                }
             } catch (error) {
-                console.error('Error sending data:', error);
-                statusDiv.textContent = 'An error occurred. Check the browser console.';
-                resultPre.textContent = error.toString();
+                clearTimeout(timeoutId);
+                uploadProgress.style.display = 'none';
+                if (error.name === 'AbortError') {
+                     resultPre.textContent = 'The upload operation was aborted due to a timeout.';
+                } else {
+                    resultPre.textContent = `Network or other error: ${error.toString()}`;
+                    statusDiv.textContent = 'Failed to send data.';
+                }
+            } finally {
+                copyButton.disabled = false;
             }
-        }
+        };
 
         copyButton.addEventListener('click', () => {
             navigator.clipboard.writeText(resultPre.textContent).then(() => {
-                copyButton.textContent = 'Copied!';
-                setTimeout(() => { copyButton.textContent = 'Copy'; }, 2000);
-            }, err => {
-                console.error('Could not copy text: ', err);
+                statusDiv.textContent = 'Result copied to clipboard!';
+            }, () => {
+                statusDiv.textContent = 'Failed to copy result.';
             });
         });
     </script>

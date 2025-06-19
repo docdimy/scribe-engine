@@ -131,6 +131,29 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 
+# Middleware for security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    if "Strict-Transport-Security" not in response.headers:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if "X-Content-Type-Options" not in response.headers:
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    if "X-Frame-Options" not in response.headers:
+        response.headers["X-Frame-Options"] = "DENY"
+    # A basic Content Security Policy. 
+    # 'unsafe-inline' is needed for the styles and scripts in index.html.
+    if "Content-Security-Policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "object-src 'none'"
+        )
+    return response
+
+
 # Middleware for request tracking and metrics
 @app.middleware("http")
 async def track_requests(request: Request, call_next):
