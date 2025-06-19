@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Security, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from cryptography.fernet import Fernet
 from app.config import settings
@@ -72,28 +72,34 @@ class SecurityManager:
 security_manager = SecurityManager()
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security_scheme)) -> Dict[str, Any]:
-    """Dependency für authentifizierte Anfragen"""
+async def get_current_user(request: Request, creds: Optional[HTTPAuthorizationCredentials] = Security(security_scheme, auto_error=False)) -> Dict[str, Any]:
+    """
+    Dependency für authentifizierte Anfragen.
+    Prüft sowohl JWT-Bearer-Token als auch X-API-Key Header.
+    """
     
-    credentials_exception = HTTPException(
+    # 1. Priorität: JWT Bearer Token
+    if creds:
+        token_payload = security_manager.verify_token(creds.credentials)
+        if token_payload:
+            logger.info(f"Authenticated via JWT for subject: {token_payload.get('sub')}")
+            return token_payload
+
+    # 2. Priorität: X-API-Key Header
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        if security_manager.validate_api_key(api_key):
+            key_hash = security_manager.hash_api_key(api_key)
+            logger.info(f"Authenticated via API Key with hash: {key_hash}")
+            return {"sub": f"api_key_{key_hash}", "auth_type": "api_key"}
+
+    # Wenn keine gültige Methode gefunden wurde
+    logger.warning("Authentication failed: No valid Bearer token or API key provided.")
+    raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid authentication credentials",
+        detail="Invalid or missing authentication credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
-    # Versuche JWT Token zu verifizieren
-    token_payload = security_manager.verify_token(credentials.credentials)
-    if token_payload:
-        return token_payload
-    
-    # Fallback: API-Key Validierung
-    if security_manager.validate_api_key(credentials.credentials):
-        return {
-            "api_key_hash": security_manager.hash_api_key(credentials.credentials),
-            "auth_type": "api_key"
-        }
-    
-    raise credentials_exception
 
 
 def hash_password(password: str) -> str:

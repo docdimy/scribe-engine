@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scribe Engine - API Development Console</title>
+    <title>Scribe Engine - API Test Console</title>
     <link rel="icon" href="/static/scribe-engine.svg" type="image/svg+xml">
     <style>
         :root {
@@ -36,7 +36,7 @@
             gap: 1rem;
             border-bottom: 1px solid var(--border-color);
         }
-        header img { height: 48px; }
+        header img { height: 64px; }
         header h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
         main {
             padding: 2rem;
@@ -54,6 +54,9 @@
             box-shadow: var(--box-shadow);
             padding: 1.5rem;
             outline: none;
+        }
+        .result-card {
+            grid-column: span 2;
         }
         h2 { margin-top: 0; font-size: 1.1rem; font-weight: 600; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.75rem; margin-bottom: 1rem;}
         label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.875rem; }
@@ -109,13 +112,16 @@
             .grid-container {
                 grid-template-columns: 1fr;
             }
+            .result-card {
+                grid-column: auto;
+            }
         }
     </style>
 </head>
 <body>
     <header>
         <img src="/static/scribe-engine.svg" alt="Logo">
-        <h1>API Development Console</h1>
+        <h1>API Test Console</h1>
     </header>
 
     <main>
@@ -190,7 +196,7 @@
                 <progress id="uploadProgress" value="0" max="100" style="width: 100%; margin-top: 1rem; display: none;"></progress>
             </div>
 
-            <div class="card" style="grid-column: span 2;" tabindex="0">
+            <div class="card result-card" tabindex="0">
                 <div class="result-header">
                     <h2>3. API Result</h2>
                     <button id="copyButton" aria-label="Copy result to clipboard">Copy</button>
