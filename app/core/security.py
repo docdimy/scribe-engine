@@ -10,6 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, Security, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security.utils import get_authorization_scheme_param
 from cryptography.fernet import Fernet
 from app.config import settings
 from app.core.logging import get_logger
@@ -72,18 +73,21 @@ class SecurityManager:
 security_manager = SecurityManager()
 
 
-async def get_current_user(request: Request, creds: Optional[HTTPAuthorizationCredentials] = Security(security_scheme, auto_error=False)) -> Dict[str, Any]:
+async def get_current_user(request: Request) -> Dict[str, Any]:
     """
     Dependency für authentifizierte Anfragen.
     Prüft sowohl JWT-Bearer-Token als auch X-API-Key Header.
     """
     
-    # 1. Priorität: JWT Bearer Token
-    if creds:
-        token_payload = security_manager.verify_token(creds.credentials)
-        if token_payload:
-            logger.info(f"Authenticated via JWT for subject: {token_payload.get('sub')}")
-            return token_payload
+    # 1. Priorität: JWT Bearer Token aus "Authorization"-Header
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        scheme, credentials = get_authorization_scheme_param(auth_header)
+        if scheme.lower() == "bearer":
+            token_payload = security_manager.verify_token(credentials)
+            if token_payload:
+                logger.info(f"Authenticated via JWT for subject: {token_payload.get('sub')}")
+                return token_payload
 
     # 2. Priorität: X-API-Key Header
     api_key = request.headers.get("X-API-Key")

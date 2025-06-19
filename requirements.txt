@@ -1,5 +1,5 @@
 # Core
-fastapi
+fastapi>=0.70.0
 pydantic
 pydantic-settings
 python-dotenv
