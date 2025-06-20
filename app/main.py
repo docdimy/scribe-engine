@@ -115,8 +115,9 @@ app = FastAPI(
     ]
 )
 
-# Mount static files directory
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# Mount static files directory only in development
+if settings.environment == "development":
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # CORS middleware
 app.add_middleware(
@@ -255,11 +256,12 @@ async def readiness_check(request: Request):
         return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=response_data)
 
 
-# Serve main page
-@app.get("/", include_in_schema=False)
-async def read_index():
-    """Serviert die statische Test-Webseite"""
-    return FileResponse('app/static/index.html')
+# Serve index.html only in development
+if settings.environment == "development":
+    @app.get("/", include_in_schema=False)
+    async def read_index():
+        """Serves the index.html file."""
+        return FileResponse("app/static/index.html")
 
 
 # Prometheus metrics endpoint

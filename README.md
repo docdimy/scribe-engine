@@ -1,23 +1,23 @@
 <p align="center">
   <img src="app/static/scribe-engine.svg" alt="Scribe Engine Logo" width="400">
 </p>
-<h1 align="center">Medical Audio Transcription & Analysis</h1>
+<h1 align="center">Scribe Engine: Medical Audio Transcription & Analysis</h1>
 
-A scalable FastAPI-based microservice for processing audio data, STT integration and LLM-based medical analysis with FHIR R4 compliance.
+A scalable FastAPI-based microservice for processing medical audio, integrating with state-of-the-art STT/LLM services, and generating structured clinical data, including FHIR R4 bundles.
 
 ## ✨ Features
 
-- **🎙️ Audio Transcription** with OpenAI (`gpt-4o-mini-transcribe`) and AssemblyAI (`assemblyai-universal`)
-- **🗣️ Automatic STT Backend Selection** based on diarization requirement
-- **🤖 Multi-lingual LLM Analysis** with selectable input and output languages
-- **🔗 Flexible FHIR R4 Integration** with selectable bundle types (`document` or `transaction`)
-- **🔐 Security** with API-Key/JWT authentication
-- **📊 Monitoring** with Prometheus metrics
-- **🌍 Multi-language Support** for transcription and analysis
-- **⚡ Rate Limiting** for API protection
-- **📋 Audit Logging** for compliance
+- **🎙️ Automatic STT Backend Selection**: Switches between OpenAI `whisper-1` for standard transcription and AssemblyAI for diarization.
+- **🧠 Advanced LLM Analysis**: Uses models like `gpt-4o` to extract structured clinical data from unstructured transcripts.
+- **🌍 Multi-language Support**: For both transcription and analysis, with automatic language detection.
+- **🔗 Flexible FHIR R4 Integration**: Generates `document` or `transaction` bundles, ready for EMR/KIS integration.
+- **🔐 Secure & Compliant**: Features API-Key authentication, in-transit data encryption, and audit logging capabilities.
+- **⚡ High Performance**: Built on FastAPI and asynchronous libraries for high throughput.
+- **✅ Health & Readiness Checks**: Implements `/health` and `/ready` endpoints for robust, production-ready deployments.
 
 ## 🏗️ Architecture
+
+The system is designed as a straightforward pipeline: a client sends audio to the Scribe Engine, which orchestrates calls to external AI services and returns structured data.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -25,16 +25,14 @@ A scalable FastAPI-based microservice for processing audio data, STT integration
 │ (PWA, EMR, ...) │    │                 │    │                 │
 │                 │    │ • Validation    │    │ • OpenAI        │
 │                 │    │ • Transcription │    │ • AssemblyAI    │
-│                 │    │ • Analysis      │    │                 │
+│                 │    │ • LLM Analysis  │    │                 │
 └─────────────────┘    │ • FHIR Export   │    └─────────────────┘
                        │                 │
-                       │ • Security      │    ┌─────────────────┐
-                       │ • Monitoring    │───▶│ Infrastructure  │
-                       │ • Logging       │    │                 │
-                       └─────────────────┘    │ • Redis         │
-                                              │ • Prometheus    │
-                                              └─────────────────┘
+                       │ • Security      │
+                       │ • Logging       │
+                       └─────────────────┘
 ```
+_Note: While the codebase includes configurations for Prometheus and Redis, they are optional and typically used in production environments, not in the default development setup._
 
 ## 🚀 Quick Start
 
@@ -53,22 +51,36 @@ cd scribe-engine
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file in the root directory and add your API keys.
+Create a `.env` file in the root directory. This file is essential for providing API keys and secrets to the application.
 
 ```bash
 # .env
+
+# A long, random string used for signing authentication tokens.
+# Generate one with: openssl rand -hex 32
 API_SECRET_KEY="your-super-secret-key-for-jwt-and-authentication"
+
+# A 32-byte (256-bit) key for encrypting audio data at rest.
+# Generate one with: openssl rand -hex 32
+DATA_ENCRYPTION_KEY="your-32-byte-hex-encoded-data-encryption-key"
+
+# API keys for external services
 OPENAI_API_KEY="sk-..."
-ASSEMBLYAI_API_KEY="..."
+ASSEMBLYAI_API_KEY="your-assemblyai-key" # Required only for diarization
 ```
 
 ### 3. Build and Start with Docker Compose
 
-For development, use the `docker-compose.development.yml` file.
+The development environment is streamlined and does not require Redis or Prometheus.
 
 ```bash
 # Use --build the first time or after changing requirements.txt
 docker-compose -f docker-compose.development.yml up --build -d
+```
+
+To view logs:
+```bash
+docker-compose -f docker-compose.development.yml logs -f
 ```
 
 To stop the service:
@@ -76,80 +88,80 @@ To stop the service:
 docker-compose -f docker-compose.development.yml down
 ```
 
-### 4. Test API
+### 4. Test the API
 
 The service includes a simple web interface for easy testing. Once the container is running, open your browser and navigate to:
 
-**➡️ <http://localhost:3001/>**
+**➡️ <http://localhost:3002/>** (Note the port `3002` for the development setup)
 
-You can use this interface to record audio directly in the browser and send it to the API.
+You can use this interface to record audio, select options, and send requests to the API.
+
+> **Note:** This web interface (`index.html`) is only available when the service is running in `development` mode. It is disabled in `production` for security reasons.
 
 Alternatively, you can use `curl` to check if the service is running:
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:3002/health
 ```
-
-A successful response should look like this:
-```json
-{"status":"healthy","timestamp":"...","version":"1.0.0","uptime_seconds":...}
-```
+A successful response will look like: `{"status":"healthy",...}`
 
 ## 📋 API Documentation
 
-The API is documented via OpenAPI and can be explored at `http://localhost:3001/docs` when running in development mode.
-
-For manual tests, it is recommended to use the **built-in web interface at <http://localhost:3001/>**. The following `curl` examples are for automated scripting.
+The API is documented via OpenAPI and can be explored at **`http://localhost:3002/docs`** when running in development mode.
 
 ### Main Endpoint: `POST /v1/transcribe`
 
-This is the primary endpoint for all transcription and analysis tasks. It accepts a `multipart/form-data` request containing the audio file and uses query parameters for configuration.
+This is the primary endpoint for all tasks. It accepts a `multipart/form-data` request containing the audio file and all configuration parameters.
 
-#### Query Parameters
+#### Form Data Parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `audio_file` | file | **Required** | The audio file to be processed. |
-| `model` | enum | `gpt-4.1-nano` | The LLM to use for analysis. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
-| `diarization` | bool | `false` | If `true`, enables speaker separation. This automatically uses AssemblyAI as the STT backend. |
+| `file` | file | **Required** | The audio file to be processed. |
+| `model` | enum | `gpt-4o-mini` | The LLM to use for **analysis**. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
+| `diarization` | bool | `false` | If `true`, enables speaker separation. This **automatically uses AssemblyAI** as the STT backend. |
 | `language` | string | `auto` | ISO 639-1 code for the **input** audio language. `auto` enables automatic detection. |
-| `output_language` | string | detected language | ISO 639-1 code for the **output** analysis language. Defaults to the detected input language. |
+| `output_language` | string | `de` | ISO 639-1 code for the **output** analysis language. |
 | `output_format` | enum | `json` | Desired output format. Can be `json`, `xml`, or `fhir`. |
-| `fhir_bundle_type` | enum | `document` | The type of FHIR bundle to generate. Can be `document` or `transaction`. **Only used if `output_format=fhir`**. |
+| `fhir_bundle_type`| enum | `document` | Type of FHIR bundle. Can be `document` or `transaction`. **Only used if `output_format=fhir`**. |
 | `specialty` | string | `general` | Medical specialty to tailor the analysis (e.g., `cardiology`). |
 | `conversation_type`| string | `consultation` | The type of conversation for better contextual analysis. |
 
 ---
 
-#### Request Examples
+#### `curl` Request Examples
+
+**Note:** All parameters are sent as form fields, not query parameters.
 
 ##### Example 1: Simple JSON Analysis (German)
 
-Transcribe a German audio file and get the analysis back in German.
-
 ```bash
-curl -X POST "http://localhost:3001/v1/transcribe?language=de" \
-  -H "Authorization: Bearer your-api-key" \
-  -F "audio_file=@/path/to/your/german_audio.mp3"
+curl -X POST "http://localhost:3002/v1/transcribe" \
+  -H "Authorization: Bearer your-test-api-key" \
+  -F "file=@/path/to/your/german_audio.mp3" \
+  -F "language=de"
 ```
 
 ##### Example 2: FHIR Document for Cardiology (English Output)
 
-Transcribe a German audio file but generate an English analysis and a FHIR `document` bundle for a cardiology context.
-
 ```bash
-curl -X POST "http://localhost:3001/v1/transcribe?language=de&output_language=en&output_format=fhir&specialty=cardiology" \
-  -H "Authorization: Bearer your-api-key" \
-  -F "audio_file=@/path/to/your/german_audio.mp3"
+curl -X POST "http://localhost:3002/v1/transcribe" \
+  -H "Authorization: Bearer your-test-api-key" \
+  -F "file=@/path/to/your/audio.mp3" \
+  -F "language=de" \
+  -F "output_language=en" \
+  -F "output_format=fhir" \
+  -F "specialty=cardiology"
 ```
 
 ##### Example 3: FHIR Transaction with Diarization
 
-Transcribe an audio file with multiple speakers, generating a FHIR `transaction` bundle ready to be posted to an EMR/KIS.
-
 ```bash
-curl -X POST "http://localhost:3001/v1/transcribe?diarization=true&output_format=fhir&fhir_bundle_type=transaction" \
-  -H "Authorization: Bearer your-api-key" \
-  -F "audio_file=@/path/to/your/multi-speaker-audio.mp3"
+curl -X POST "http://localhost:3002/v1/transcribe" \
+  -H "Authorization: Bearer your-test-api-key" \
+  -F "file=@/path/to/your/multi-speaker-audio.mp3" \
+  -F "diarization=true" \
+  -F "output_format=fhir" \
+  -F "fhir_bundle_type=transaction"
 ```
 ---
 
@@ -160,21 +172,36 @@ The service can generate fully FHIR R4-compliant bundles. Depending on the `fhir
 ### `document` Bundle (Default)
 - **Type:** `document`
 - **Purpose:** Creates a static, unchangeable clinical document, much like a PDF. Ideal for archiving or sharing a snapshot in time.
-- **Structure:** The bundle is centered around a `Composition` resource that acts as a table of contents, linking to all other resources.
+- **Structure:** The bundle is centered around a `Composition` resource that acts as a table of contents, linking to all other resources within the bundle.
 
 ### `transaction` Bundle
 - **Type:** `transaction`
 - **Purpose:** Creates a set of instructions for a FHIR server. It's an "atomic" operation: either all resources are created successfully, or none are. Ideal for writing data into an EMR or clinical data repository.
-- **Structure:** The bundle contains a list of resources, each with a `request` field (`POST`, `PUT`) telling the receiving server what to do.
+- **Structure:** The bundle contains a list of resources, each with a `request` field (`method: "POST"`, `url: "ResourceType"`) telling the receiving server what to do.
 
-**Generated Resources:**
-- **Composition** (only in `document` bundles)
-- **Patient** (anonymized placeholder)
-- **Practitioner** (anonymized placeholder)
-- **Encounter**
-- **Condition** (from analysis)
-- **MedicationStatement** (from analysis)
-- **CarePlan** (from analysis)
+**Generated FHIR Resources:**
+- `Composition` (only in `document` bundles)
+- `Patient` (anonymized placeholder)
+- `Practitioner` (anonymized placeholder)
+- `Encounter`
+- `Condition` (from analysis)
+- `MedicationStatement` (from analysis)
+- `CarePlan` (from analysis)
+
+## 🐳 Deployment
+
+The `docker-compose.production.yml` file is provided as a starting point for production deployments. It is recommended to run it behind a reverse proxy like Nginx or Traefik to handle SSL termination and load balancing.
+
+Key differences from the development setup:
+- Uses `gunicorn` for a production-grade WSGI server.
+- Can be configured to use Redis for more robust rate limiting across multiple replicas.
+- Does not mount local source code, using only the code baked into the Docker image.
+
+To build a production-ready image:
+```bash
+docker build -t your-registry/scribe-engine:latest .
+```
+And push it to your container registry.
 
 ## 🔧 Configuration Details
 
