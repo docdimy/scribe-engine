@@ -24,7 +24,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response, FileResponse
 
-from app.config import settings, OutputFormat, ModelName, STTModel, FHIRBundleType
+from app.config import settings, OutputFormat, ModelName, FHIRBundleType
 from app.core.logging import setup_logging, get_logger, audit_logger
 from app.core.security import get_current_user, security_manager, AuthenticationError
 from app.models.responses import (
@@ -59,17 +59,6 @@ security = HTTPBearer()
 
 
 # --- Dependency Status Checks ---
-async def check_openai_status() -> (str, str):
-    """Checks the status of the OpenAI API."""
-    try:
-        client = httpx.AsyncClient()
-        response = await client.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {settings.openai_api_key}"})
-        if response.status_code == 200:
-            return "ok", "OpenAI API is reachable."
-        return "error", f"OpenAI API returned status {response.status_code}."
-    except Exception as e:
-        return "error", f"Failed to connect to OpenAI API: {e}"
-
 async def check_assemblyai_status() -> (str, str):
     """Checks the status of the AssemblyAI API."""
     try:
@@ -228,8 +217,9 @@ async def readiness_check(request: Request):
     Checks if the service and its dependencies are ready to accept traffic.
     Returns 200 OK if all checks pass, otherwise 503 Service Unavailable.
     """
+    # OpenAI status is checked by LLM service when needed.
+    # We only check AssemblyAI here as it's the core STT dependency.
     checks = {
-        "openai": check_openai_status(),
         "assemblyai": check_assemblyai_status(),
     }
     
@@ -290,11 +280,12 @@ async def metrics():
 @limiter.limit(f"{settings.rate_limit_requests}/minute")
 async def transcribe_audio(
     request: Request,
+    background_tasks: BackgroundTasks,
     user_info: dict = Depends(get_current_user),
     audio_file: UploadFile = File(..., alias="file"),
     # Form fields
     output_format: OutputFormat = Form(OutputFormat.JSON),
-    model: ModelName = Form(ModelName.GPT_4O_MINI),
+    model: ModelName = Form(ModelName.GPT_4_1_NANO),
     diarization: bool = Form(False),
     specialty: str = Form("general"),
     conversation_type: str = Form("consultation"),
@@ -303,71 +294,91 @@ async def transcribe_audio(
     fhir_bundle_type: Optional[FHIRBundleType] = Form(None)
 ):
     """
-    Main endpoint for audio transcription, analysis, and formatting.
+    This endpoint receives an audio file and configuration, transcribes the audio,
+    analyzes the content with an LLM, and returns the result in the specified format.
     """
     request_id = request.state.request_id
-    start_time = request.state.start_time
-    logger.info(f"Request {request_id}: New transcription request from user {user_info.get('sub')}")
-
     temp_audio_file = None
+    
+    # --- Input Validation ---
+    if language != "auto" and language not in settings.supported_languages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported input language '{language}'. Supported are: {', '.join(settings.supported_languages)}"
+        )
+    if output_language and output_language not in settings.supported_languages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported output language '{output_language}'. Supported are: {', '.join(settings.supported_languages)}"
+        )
+    
     try:
-        # Determine STT provider and model based on diarization
-        if diarization:
-            stt_provider = "assemblyai"
-            stt_model = STTModel.ASSEMBLYAI_UNIVERSAL.value
-        else:
-            stt_provider = "openai"
-            stt_model = STTModel.WHISPER_1.value
-
-        # Step 1: Process and save audio securely
+        # --- 1. Save and encrypt audio file ---
+        # This returns an open temporary file that must be closed later
         temp_audio_file = await process_and_save_audio(audio_file, specialty)
+        file_path = temp_audio_file.name
 
-        # Step 2: Transcribe the audio
-        logger.info(f"Request {request_id}: Starting transcription with {stt_provider}")
-        transcript = await stt_service.transcribe(
+        # --- 2. Transcription ---
+        logger.info(f"[{request_id}] Starting transcription with AssemblyAI...")
+        
+        transcript_result = await stt_service.transcribe(
             request_id=request_id,
-            file_path=temp_audio_file.name,
-            stt_provider=stt_provider,
-            stt_model=stt_model,
+            file_path=file_path,
             diarization=diarization,
             language=language,
-            stt_prompt=f"Specialty: {specialty}, Conversation: {conversation_type}"
         )
-        logger.info(f"Request {request_id}: Transcription successful.")
+        
+        # Add the deletion of the transcript to background tasks
+        if transcript_result.provider_transcript_id:
+            background_tasks.add_task(
+                stt_service.delete_transcript, transcript_result.provider_transcript_id
+            )
 
-        # Step 3: Analyze the transcript
-        logger.info(f"Request {request_id}: Starting analysis with LLM.")
-        analysis = await llm_service.analyze(
-            transcript=transcript.full_text,
+        # Determine the language for the LLM analysis output.
+        # Priority: 1. User-specified output language.
+        #           2. Detected language from STT.
+        #           3. Fallback to English.
+        if output_language:
+            llm_output_lang = output_language
+        elif transcript_result.language_detected:
+            llm_output_lang = transcript_result.language_detected
+        else:
+            logger.warning(f"[{request_id}] Could not determine language. Defaulting LLM output to English.")
+            llm_output_lang = "en"
+        
+        # --- 3. Analysis ---
+        logger.info(f"[{request_id}] Starting analysis with LLM...")
+        analysis_result = await llm_service.analyze(
+            transcript=transcript_result.full_text,
             model=model.value,
             specialty=specialty,
             conversation_type=conversation_type,
-            output_language=output_language or transcript.language_detected or "en"
+            output_language=llm_output_lang
         )
         
-        logger.info(f"Request {request_id}: LLM analysis completed successfully.")
+        logger.info(f"[{request_id}] LLM analysis completed successfully.")
 
-        # Step 4: Format the output
+        # --- 4. Format the output ---
         fhir_bundle = None
         if output_format == OutputFormat.FHIR:
             fhir_bundle = await fhir_service.create_fhir_bundle(
                 request_id=request_id,
-                transcript=transcript, 
-                analysis=analysis,
+                transcript=transcript_result, 
+                analysis=analysis_result,
                 specialty=specialty,
                 conversation_type=conversation_type,
                 bundle_type=fhir_bundle_type
             )
-            logger.info(f"Request {request_id}: Analysis formatted to FHIR.")
+            logger.info(f"[{request_id}] Analysis formatted to FHIR.")
 
-        # Step 5: Create final response
-        processing_time_ms = int((time.time() - start_time) * 1000)
+        # --- 5. Create final response ---
+        processing_time_ms = int((time.time() - request.state.start_time) * 1000)
 
         response_data = ScribeResponse(
             request_id=request_id,
             timestamp=datetime.utcnow(),
-            transcript=transcript,
-            analysis=analysis,
+            transcript=transcript_result,
+            analysis=analysis_result,
             output_format=output_format,
             processing_time_ms=processing_time_ms
         )
@@ -378,7 +389,7 @@ async def transcribe_audio(
             # Then load it back to a dict for JSONResponse to handle correctly.
             return JSONResponse(content=json.loads(response_data.model_dump_json(exclude_none=True)))
         elif output_format == OutputFormat.XML:
-            xml_content = _create_xml_output(request_id, transcript, analysis)
+            xml_content = _create_xml_output(request_id, transcript_result, analysis_result)
             response_data.xml_content = xml_content
             return PlainTextResponse(content=xml_content, media_type="application/xml")
 

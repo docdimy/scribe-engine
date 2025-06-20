@@ -1,6 +1,6 @@
 """
 Speech-to-Text Service
-Supports OpenAI and AssemblyAI for transcription with diarization
+Uses AssemblyAI for transcription with diarization support.
 """
 
 import asyncio
@@ -8,14 +8,11 @@ import tempfile
 import os
 from typing import List, Optional, Dict, Any
 import httpx
-import openai
 import assemblyai as aai
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from fastapi import UploadFile, HTTPException, status
-import librosa
-import soundfile as sf
 import io
 
 # Try to import the specific error class, fall back if it doesn't exist
@@ -31,79 +28,51 @@ from app.core.security import data_encryption
 
 logger = get_logger(__name__)
 
-# Configure external clients
-openai_client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+# Configure AssemblyAI client
 if settings.assemblyai_api_key:
     aai.settings.api_key = settings.assemblyai_api_key
+    aai.settings.base_url = settings.assemblyai_api_base_url
+    logger.info(f"Configured AssemblyAI client to use base URL: {settings.assemblyai_api_base_url}")
 
-# Define retryable exceptions
-RETRYABLE_EXCEPTIONS = (httpx.TimeoutException, httpx.NetworkError, openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError, openai.InternalServerError, AssemblyAIError)
+# Define retryable exceptions for network issues or server errors
+RETRYABLE_EXCEPTIONS = (httpx.TimeoutException, httpx.NetworkError, AssemblyAIError)
+
 
 class STTService:
-    """Service for Speech-to-Text transcription."""
+    """Service for Speech-to-Text transcription using AssemblyAI."""
 
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-        before_sleep=lambda retry_state: logger.warning(f"Retrying STT API call, attempt {retry_state.attempt_number}...")
+        before_sleep=lambda retry_state: logger.warning(f"Retrying AssemblyAI API call, attempt {retry_state.attempt_number}...")
     )
-    async def _transcribe_with_openai(
-        self, file_path: str, language: str, stt_model: str, stt_prompt: Optional[str]
+    async def transcribe(
+        self,
+        request_id: str,
+        file_path: str,
+        diarization: bool,
+        language: str,
+        stt_prompt: Optional[str] = None # Added for future use with AssemblyAI prompting
     ) -> TranscriptionResult:
-        """Transcribes audio using OpenAI's Whisper API after decrypting."""
-        logger.info(f"Starting transcription with OpenAI for file: {file_path}")
-        decrypted_audio = None
-        try:
-            with open(file_path, "rb") as f:
-                encrypted_data = f.read()
+        """
+        Transcribes audio using AssemblyAI's API.
+        The audio file at file_path is expected to be encrypted.
+        """
+        if not settings.assemblyai_api_key:
+            raise ValueError("AssemblyAI API key is not configured.")
             
-            logger.info("Decrypting audio data for transcription.")
-            decrypted_audio = data_encryption.decrypt_data(encrypted_data)
-            logger.info("Audio data successfully decrypted.")
-
-            audio_file = io.BytesIO(decrypted_audio)
-            audio_file.name = "audio.webm" 
-
-            transcript = await openai_client.audio.transcriptions.create(
-                model=stt_model,
-                file=audio_file,
-                response_format="verbose_json",
-                language=language if language != "auto" else None,
-                prompt=stt_prompt
-            )
-
-            segments = [
-                TranscriptSegment(start=seg.start, end=seg.end, text=seg.text)
-                for seg in transcript.segments
-            ]
-            
-            result = TranscriptionResult(
-                full_text=transcript.text, 
-                segments=segments,
-                language_detected=getattr(transcript, 'language', language)
-            )
-            logger.info(f"OpenAI transcription successful: {len(transcript.text)} characters")
-            return result
-        except openai.APIError as e:
-            logger.error(f"OpenAI API error during transcription: {e}", exc_info=True)
-            raise
-        finally:
-            if decrypted_audio:
-                data_encryption.secure_delete(decrypted_audio)
-    
-    @retry(
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-        before_sleep=lambda retry_state: logger.warning(f"Retrying STT API call, attempt {retry_state.attempt_number}...")
-    )
-    async def _transcribe_with_assemblyai(
-        self, file_path: str, diarization: bool, language: str
-    ) -> TranscriptionResult:
-        """Transcribes audio using AssemblyAI's API after decrypting."""
         logger.info(f"Starting transcription with AssemblyAI for file: {file_path}")
         decrypted_audio = None
+        
+        audit_logger.log_transcription_request(
+            request_id=request_id,
+            provider="assemblyai",
+            model="universal (default)", # Using the default recommended model from AssemblyAI
+            diarization=diarization,
+            language=language
+        )
+
         try:
             with open(file_path, "rb") as f:
                 encrypted_data = f.read()
@@ -112,16 +81,28 @@ class STTService:
             decrypted_audio = data_encryption.decrypt_data(encrypted_data)
             logger.info("Audio data successfully decrypted.")
             
-            config = aai.TranscriptionConfig(
-                speaker_labels=diarization,
-                language_code=language if language != "auto" else None,
-            )
+            config_params = {"speaker_labels": diarization}
+            
+            if language == "auto":
+                config_params["language_detection"] = True
+            else:
+                config_params["language_code"] = language
+
+            # Future: Add prompt support when needed
+            # if stt_prompt:
+            #     config_params["prompt"] = stt_prompt
+
+            config = aai.TranscriptionConfig(**config_params)
             transcriber = aai.Transcriber(config=config)
             
             transcript = transcriber.transcribe(decrypted_audio)
 
             if transcript.status == aai.TranscriptStatus.error:
+                logger.error(f"AssemblyAI transcription failed: {transcript.error}")
                 raise AssemblyAIError(f"AssemblyAI transcription failed: {transcript.error}")
+
+            # Log the link between our request ID and AssemblyAI's transcript ID for traceability
+            logger.info(f"[{request_id}] AssemblyAI transcript created with ID: {transcript.id}")
 
             if diarization and transcript.utterances:
                  segments = [
@@ -129,66 +110,55 @@ class STTService:
                     for utt in transcript.utterances
                 ]
             else:
+                # Fallback to words if utterances are not available
                 segments = [
                     TranscriptSegment(start=word.start / 1000.0, end=word.end / 1000.0, text=word.text)
                     for word in transcript.words
                 ]
 
+            # Correctly determine the detected language from the transcript's config.
+            detected_language_val = None
+            if transcript.config and transcript.config.language_code:
+                lang_code = transcript.config.language_code
+                if hasattr(lang_code, 'value'):
+                    detected_language_val = lang_code.value
+                else:
+                    detected_language_val = str(lang_code)
+
             result = TranscriptionResult(
-                full_text=transcript.text,
+                provider_transcript_id=transcript.id,
+                full_text=transcript.text or "",
                 segments=segments,
-                language_detected=getattr(transcript, 'language_code', language)
+                language_detected=detected_language_val # This will be 'de', 'en', or None
             )
-            logger.info(f"AssemblyAI transcription successful: {len(transcript.text)} characters")
+            logger.info(f"AssemblyAI transcription successful for ID {transcript.id}: {len(transcript.text or '')} characters")
             return result
         except Exception as e:
-            logger.error(f"AssemblyAI error during transcription: {e}", exc_info=True)
+            logger.error(f"Error during AssemblyAI transcription: {e}", exc_info=True)
             raise
         finally:
             if decrypted_audio:
+                # Ensure the decrypted data (in-memory bytes) is securely cleared
                 data_encryption.secure_delete(decrypted_audio)
 
-    async def transcribe(
-        self,
-        request_id: str,
-        file_path: str,
-        stt_provider: str,
-        stt_model: str,
-        diarization: bool,
-        language: str,
-        stt_prompt: Optional[str],
-    ) -> TranscriptionResult:
+    async def delete_transcript(self, transcript_id: str):
         """
-        Routes the transcription request to the appropriate provider and model.
+        Deletes a transcript from AssemblyAI's servers.
+        This is a 'fire-and-forget' operation from the user's perspective.
         """
+        if not transcript_id:
+            return
+        
+        logger.info(f"Initiating deletion of AssemblyAI transcript ID: {transcript_id}")
         try:
-            audit_logger.log_transcription_request(
-                request_id=request_id,
-                provider=stt_provider,
-                model=stt_model,
-                diarization=diarization,
-                language=language
-            )
-
-            if stt_provider == "openai":
-                return await self._transcribe_with_openai(file_path, language, stt_model, stt_prompt)
-            elif stt_provider == "assemblyai":
-                if not settings.assemblyai_api_key:
-                    raise ValueError("AssemblyAI API key is not configured.")
-                return await self._transcribe_with_assemblyai(file_path, diarization, language)
-            else:
-                logger.error(f"Unsupported STT provider: {stt_provider}")
-                raise ValueError(f"Unsupported STT provider: {stt_provider}")
+            # Use the static method `delete_by_id` and run it in a thread
+            # to avoid blocking the async event loop.
+            await asyncio.to_thread(aai.Transcript.delete_by_id, transcript_id)
+            logger.info(f"Successfully deleted AssemblyAI transcript ID: {transcript_id}")
         except Exception as e:
-            logger.error(f"Error during transcription: {e}", exc_info=True)
-            raise
+            # We log the error but do not re-raise it, as this is a background task.
+            logger.error(f"Failed to delete AssemblyAI transcript ID {transcript_id}: {e}", exc_info=True)
 
-    def get_available_models(self) -> dict:
-        """Returns a dictionary of available models per provider."""
-        return {
-            "openai": ["whisper-1"], 
-            "assemblyai": ["default"], 
-        }
 
 async def process_and_save_audio(file: UploadFile, specialty: str) -> NamedTemporaryFile:
     """

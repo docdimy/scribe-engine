@@ -7,8 +7,8 @@ A scalable FastAPI-based microservice for processing medical audio, integrating 
 
 ## ✨ Features
 
-- **🎙️ Automatic STT Backend Selection**: Switches between OpenAI `whisper-1` for standard transcription and AssemblyAI for diarization.
-- **🧠 Advanced LLM Analysis**: Uses models like `gpt-4o` to extract structured clinical data from unstructured transcripts.
+- **🎙️ High-Quality Transcription**: Uses AssemblyAI's Universal model for accurate speech-to-text, including optional speaker diarization.
+- **🧠 Advanced LLM Analysis**: Uses the `GPT-4.1 series` models to extract structured clinical data from unstructured transcripts.
 - **🌍 Multi-language Support**: For both transcription and analysis, with automatic language detection.
 - **🔗 Flexible FHIR R4 Integration**: Generates `document` or `transaction` bundles, ready for EMR/KIS integration.
 - **🔐 Secure & Compliant**: Features API-Key authentication, in-transit data encryption, and audit logging capabilities.
@@ -17,17 +17,16 @@ A scalable FastAPI-based microservice for processing medical audio, integrating 
 
 ## 🏗️ Architecture
 
-The system is designed as a straightforward pipeline: a client sends audio to the Scribe Engine, which orchestrates calls to external AI services and returns structured data.
+The system is designed as a straightforward pipeline: a client sends audio to the Scribe Engine, which orchestrates calls to external AI services (AssemblyAI for STT, OpenAI for LLM analysis) and returns structured data.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Client App    │───▶│  Scribe Engine  │───▶│ External APIs   │
 │ (PWA, EMR, ...) │    │                 │    │                 │
-│                 │    │ • Validation    │    │ • OpenAI        │
-│                 │    │ • Transcription │    │ • AssemblyAI    │
-│                 │    │ • LLM Analysis  │    │                 │
-└─────────────────┘    │ • FHIR Export   │    └─────────────────┘
-                       │                 │
+│                 │    │ • Validation    │    │ • AssemblyAI STT│
+│                 │    │ • LLM Analysis  │    │ • OpenAI LLM    │
+│                 │    │ • FHIR Export   │    │                 │
+└─────────────────┘    │                 │    └─────────────────┘
                        │ • Security      │
                        │ • Logging       │
                        └─────────────────┘
@@ -40,7 +39,7 @@ _Note: While the codebase includes configurations for Prometheus and Redis, they
 
 - Docker & Docker Compose
 - OpenAI API Key
-- AssemblyAI API Key (only if diarization is needed)
+- AssemblyAI API Key
 
 ### 1. Clone Repository
 
@@ -66,7 +65,7 @@ DATA_ENCRYPTION_KEY="your-32-byte-hex-encoded-data-encryption-key"
 
 # API keys for external services
 OPENAI_API_KEY="sk-..."
-ASSEMBLYAI_API_KEY="your-assemblyai-key" # Required only for diarization
+ASSEMBLYAI_API_KEY="your-assemblyai-key"
 ```
 
 ### 3. Build and Start with Docker Compose
@@ -117,8 +116,8 @@ This is the primary endpoint for all tasks. It accepts a `multipart/form-data` r
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `file` | file | **Required** | The audio file to be processed. |
-| `model` | enum | `gpt-4o-mini` | The LLM to use for **analysis**. Can be `gpt-4.1-nano`, `gpt-4o-mini`, or `gpt-4o`. |
-| `diarization` | bool | `false` | If `true`, enables speaker separation. This **automatically uses AssemblyAI** as the STT backend. |
+| `model` | enum | `gpt-4.1-nano` | The LLM to use for **analysis**. Can be `gpt-4.1-nano`, `gpt-4.1-mini`, or `gpt-4.1`. |
+| `diarization` | bool | `false` | If `true`, enables speaker separation using AssemblyAI. |
 | `language` | string | `auto` | ISO 639-1 code for the **input** audio language. `auto` enables automatic detection. |
 | `output_language` | string | `de` | ISO 639-1 code for the **output** analysis language. |
 | `output_format` | enum | `json` | Desired output format. Can be `json`, `xml`, or `fhir`. |
@@ -221,9 +220,13 @@ The following MIME types and their corresponding file extensions are supported:
 
 Supports all languages provided by the backend services. For explicit use, provide the ISO 639-1 code (e.g., `de`, `en`, `es`).
 
-## 🔒 Security
+## 🔒 Security & Data Privacy
+
+This service is designed with data protection as a core principle, especially for handling sensitive medical information.
 
 ### Authentication
+
+API access is protected and requires a valid API key or a JWT token sent in the `Authorization` header.
 
 ```bash
 # API Key in header
@@ -233,14 +236,24 @@ curl -H "Authorization: Bearer your-api-key" ...
 curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." ...
 ```
 
-### Data Protection
+### Data Processing and Residency
+
+To comply with data privacy regulations like GDPR, it is crucial to understand where data is processed:
+
+- **Audio Storage & STT:** All audio data is temporarily stored encrypted on the server. For Speech-to-Text (STT) processing, the data is sent to **AssemblyAI's EU endpoint (`api.eu.assemblyai.com`)**, ensuring data residency within the European Union. Immediately after transcription, the source audio file and the transcript on AssemblyAI's servers are deleted.
+
+- **LLM Analysis:** The generated text transcript is sent for analysis to **OpenAI's API**. Currently, OpenAI does not offer EU-specific endpoints for general API users. Therefore, this data is processed on OpenAI's servers, which are primarily located in the **United States**.
+
+### Data Encryption
 
 - **Encryption-at-Rest:** All audio data is encrypted using a strong symmetric key (`Fernet`) before it is temporarily written to disk. The data is only decrypted in memory for processing and is immediately deleted afterwards.
 - **Encryption-in-Transit:** Communication with all external APIs (OpenAI, AssemblyAI) is performed exclusively over HTTPS. For client-server communication, it is strongly recommended to use a reverse proxy that handles TLS termination in production.
+
+### Additional Security Measures
+
 - **Hardened HTTP Headers:** The application sends security headers like `Strict-Transport-Security` (HSTS), `Content-Security-Policy` (CSP), and `X-Content-Type-Options` to protect against common web vulnerabilities like clickjacking and cross-site scripting (XSS).
-- **Automatic Deletion:** All temporary files and in-memory data related to a request are securely deleted immediately after processing is complete.
-- **Audit Logging** of all API access
-- **GDPR compliant** with data flow documentation
+- **Secure Deletion:** All temporary files and in-memory data related to a request are securely deleted immediately after processing is complete.
+- **Audit Logging:** All transcription and analysis requests are logged for security and traceability purposes.
 
 ## 📊 Monitoring
 

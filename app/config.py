@@ -27,15 +27,8 @@ class FHIRBundleType(str, Enum):
 
 class ModelName(str, Enum):
     GPT_4_1_NANO = "gpt-4.1-nano"
-    GPT_4O_MINI = "gpt-4o-mini"
-    GPT_4O = "gpt-4o"
-
-
-class STTModel(str, Enum):
-    ASSEMBLYAI_UNIVERSAL = "assemblyai-universal"
-    WHISPER_1 = "whisper-1"
-    # Future: Local Whisper with custom speaker diarization
-    LOCAL_WHISPER = "local-whisper"  # For future implementation
+    GPT_4_1_MINI = "gpt-4.1-mini"
+    GPT_4_1 = "gpt-4.1"
 
 
 class Settings(BaseSettings):
@@ -60,6 +53,10 @@ class Settings(BaseSettings):
     # External Service APIs
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
     assemblyai_api_key: str = Field(..., env="ASSEMBLYAI_API_KEY")
+    assemblyai_api_base_url: str = Field(
+        default="https://api.eu.assemblyai.com",
+        description="AssemblyAI API base URL. Defaults to EU server."
+    )
     
     # Rate Limiting
     rate_limit_requests: int = Field(default=10)
@@ -79,7 +76,12 @@ class Settings(BaseSettings):
     
     # Language Support
     supported_languages: List[str] = Field(
-        default=["en", "de", "fr", "es", "it", "pt", "nl", "sv", "da", "no", "fi", "auto"]
+        default=[
+            "en", "de", "es", "fr", "it", "pt", "nl", # Major European
+            "pl", "sv", "no", "fi", "da",          # Nordic & Polish
+            "ru", "uk", "tr",                      # Eastern European & Turkish
+            "auto"                                 # Automatic detection
+        ]
     )
     
     # LLM Configuration
@@ -87,10 +89,8 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2000)
     default_llm_model: str = Field(default="gpt-4.1-nano")
     
-    # STT Configuration
-    default_stt_model: str = Field(default="gpt-4o-mini-transcribe")
-    enable_local_whisper: bool = Field(default=False)  # Future feature flag
-    local_whisper_model_path: str = Field(default="/models/whisper-large-v3")  # Future
+    # STT Configuration is now simplified as we only use AssemblyAI
+    # The specific model (e.g., "universal-2") is handled in the STT service
     
     # CORS Configuration
     cors_origins: List[str] = Field(

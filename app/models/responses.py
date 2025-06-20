@@ -19,6 +19,7 @@ class TranscriptSegment(BaseModel):
 
 class TranscriptionResult(BaseModel):
     """Vollständiges Transkriptionsergebnis"""
+    provider_transcript_id: Optional[str] = Field(default=None, description="Eindeutige ID des Transkripts beim STT-Provider (z.B. AssemblyAI)")
     full_text: str = Field(description="Vollständiger transkribierter Text")
     segments: List[TranscriptSegment] = Field(
         default=[],

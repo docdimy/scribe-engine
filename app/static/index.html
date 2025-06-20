@@ -89,8 +89,8 @@
             padding: 1rem; border-radius: var(--border-radius); margin-bottom: 1.5rem;
             border: 1px solid;
         }
-        .warning { background-color: #fffbeb; color: #92400e; border-color: #fde68a; }
-        .info { background-color: #afeceb; color: #2a8a8d; border-color: #3aa6a9; }
+        .warning { background-color: #ffbd59; color: #98572e; border-color: #ff914d; }
+        .info { background-color: #92d1d0; color: #216b6e; border-color: #3aa6a9; }
         pre {
             background-color: #111827; color: #f3f4f6; padding: 1rem;
             border-radius: var(--border-radius); white-space: pre-wrap;
@@ -144,9 +144,9 @@
                     <div>
                         <label for="model">LLM Model</label>
                         <select id="model">
-                            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-                            <option value="gpt-4o">gpt-4o</option>
-                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gpt-4.1-nano" selected>nano</option>
+                            <option value="gpt-4.1-mini">mini</option>
+                            <option value="gpt-4.1">max</option>
                         </select>
                     </div>
                     <div>
@@ -234,6 +234,32 @@
         let mediaRecorder;
         let audioChunks = [];
         let streamReference;
+        let wakeLock = null;
+
+        const acquireWakeLock = async () => {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock wurde vom System freigegeben.');
+                    });
+                    console.log('Wake Lock ist aktiv.');
+                } catch (err) {
+                    console.error(`Wake Lock konnte nicht aktiviert werden: ${err.name}, ${err.message}`);
+                }
+            } else {
+                console.warn('Wake Lock API wird von diesem Browser nicht unterstützt.');
+            }
+        };
+
+        const releaseWakeLock = () => {
+            if (wakeLock !== null) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                    console.log('Wake Lock wurde freigegeben.');
+                });
+            }
+        };
 
         const updateStatus = (message, type = 'info') => {
             statusDiv.textContent = message;
@@ -315,12 +341,14 @@
                 mediaRecorder.onerror = (event) => {
                     console.error('MediaRecorder error:', event.error);
                     statusDiv.textContent = 'An error occurred during recording.';
+                    releaseWakeLock();
                     cleanupAudio();
                     recordButton.disabled = false;
                     stopButton.disabled = true;
                 };
 
                 mediaRecorder.start();
+                await acquireWakeLock();
                 recordButton.disabled = true;
                 stopButton.disabled = false;
                 statusDiv.textContent = 'Recording...';
@@ -408,6 +436,7 @@
                 updateStatus(`Client Error: ${error.message}`, 'error');
                 setProgress(100, true);
             } finally {
+                releaseWakeLock();
                 // Reset buttons to initial state
                 recordButton.disabled = false;
                 stopButton.disabled = true;
