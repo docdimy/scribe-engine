@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     assemblyai_api_key: str = Field(..., env="ASSEMBLYAI_API_KEY")
     assemblyai_api_base_url: str = Field(
         default="https://api.eu.assemblyai.com",
-        description="AssemblyAI API base URL. Defaults to EU server."
+        description="AssemblyAI API base URL. Set to EU endpoint."
     )
     
     # Rate Limiting

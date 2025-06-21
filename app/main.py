@@ -70,7 +70,7 @@ async def check_assemblyai_status() -> (str, str):
         client = httpx.AsyncClient()
         headers = {"authorization": settings.assemblyai_api_key}
         # Using a simple endpoint like /v2/transcript with a limit of 1 to check connectivity
-        response = await client.get("https://api.assemblyai.com/v2/transcript?limit=1", headers=headers)
+        response = await client.get("https://api.eu.assemblyai.com/v2/transcript?limit=1", headers=headers)
         if 200 <= response.status_code < 300:
             return "ok", "AssemblyAI API is reachable."
         return "error", f"AssemblyAI API returned status {response.status_code}."
@@ -307,13 +307,29 @@ async def run_transcription_pipeline(
         await queue.put(json.dumps({"status": "processing", "message": "Starting transcription... (this may take a moment)", "progress": 20}))
         await asyncio.sleep(0.01) # Force event to be sent before blocking
         
-        transcript_result = await stt_service.transcribe(
+        # Get the raw transcript object from AssemblyAI
+        raw_transcript = await stt_service.transcribe(
             request_id=request_id,
             file_path=file_path,
             diarization=diarization,
             language=language,
         )
-        await queue.put(json.dumps({"status": "processing", "message": f"Transcription complete. {len(transcript_result.full_text)} characters recognized.", "progress": 80}))
+
+        # --- 2.5. Speaker Labeling with LeMUR (optional step) ---
+        speaker_map = {}
+        if diarization and raw_transcript.utterances:
+            await queue.put(json.dumps({"status": "processing", "message": "Identifying speaker roles (Provider/Patient)...", "progress": 82}))
+            await asyncio.sleep(0.01) # Allow message to be sent
+            speaker_map = await llm_service.label_speakers_with_lemur(
+                raw_transcript, 
+                specialty=specialty, 
+                conversation_type=conversation_type
+            )
+
+        # Convert the raw transcript to our internal model, applying the new speaker labels
+        transcript_result = stt_service.create_transcription_result(raw_transcript, speaker_map)
+        
+        await queue.put(json.dumps({"status": "processing", "message": f"Transcription complete. {len(transcript_result.full_text)} characters recognized.", "progress": 85}))
         
         # Add the deletion of the transcript to background tasks
         if transcript_result.provider_transcript_id:
@@ -332,7 +348,7 @@ async def run_transcription_pipeline(
         
         # --- 3. Analysis (slow-ish operation) ---
         logger.info(f"[{request_id}] Starting analysis with LLM...")
-        await queue.put(json.dumps({"status": "processing", "message": "Starting medical analysis...", "progress": 85}))
+        await queue.put(json.dumps({"status": "processing", "message": "Starting medical analysis...", "progress": 90}))
         await asyncio.sleep(0.01) # Force event to be sent before blocking
         analysis_result = await llm_service.analyze(
             transcript=transcript_result.full_text,

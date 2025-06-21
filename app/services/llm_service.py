@@ -10,6 +10,9 @@ from app.core.logging import get_logger
 import httpx
 from openai.types.chat import ChatCompletion
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import assemblyai as aai
+import json
+import asyncio
 
 logger = get_logger(__name__)
 
@@ -75,6 +78,73 @@ class LLMService:
         except Exception as e:
             logger.error(f"LLM analysis failed: {e}", exc_info=True)
             raise
+
+    async def label_speakers_with_lemur(
+        self, 
+        transcript: aai.Transcript, 
+        specialty: str, 
+        conversation_type: str
+    ) -> Dict[str, str]:
+        """
+        Uses LeMUR to identify and label speakers as 'Provider' or 'Client'.
+        Returns a mapping dictionary, e.g., {'A': 'Provider', 'B': 'Client'}.
+        """
+        if not transcript.utterances:
+            logger.warning("No utterances found in transcript, cannot label speakers.")
+            return {}
+
+        # Extract the unique speaker labels from the transcript to give LeMUR clear instructions
+        speaker_labels = sorted(list(set(utt.speaker for utt in transcript.utterances if utt.speaker)))
+        if not speaker_labels:
+            logger.warning("Could not find any speaker labels in the utterances.")
+            return {}
+        
+        speaker_labels_str = ", ".join(f"'{label}'" for label in speaker_labels)
+
+        prompt = (
+            "You are an expert in analyzing medical conversations.\n"
+            f"The following transcript contains speakers identified by the labels: {speaker_labels_str}.\n"
+            "Based on the content of the conversation, please determine which speaker label corresponds to the 'Client' (e.g., patient, client) and which corresponds to the 'Provider' (e.g., doctor, practitioner, clinician, medical professional, nurse, therapist).\n"
+            "Consider who is describing symptoms versus who is asking questions and providing medical advice.\n"
+            "Your response MUST be a single, valid JSON object that maps each speaker label to one of the two roles: 'Client' or 'Provider'.\n"
+            "For example: {\"A\": \"Provider\", \"B\": \"Client\"}"
+        )
+        
+        context = f"This is a medical conversation within the specialty of '{specialty}'. The conversation type is a '{conversation_type}'."
+
+        try:
+            logger.info(f"Sending transcript (ID: {transcript.id}) to LeMUR for speaker labeling with context: {context}")
+            # Call LeMUR via the transcript object. This needs to be run in a thread
+            # as the SDK call itself is synchronous.
+            lemur_response = await asyncio.to_thread(
+                transcript.lemur.task,
+                prompt=prompt,
+                context=context,
+                final_model="anthropic/claude-3-haiku",
+                temperature=0.1, # Low temperature for factual, deterministic output
+            )
+
+            # Parse the JSON response from LeMUR
+            # The response might be a plain string, so we need to be careful
+            response_text = lemur_response.response.strip()
+            logger.debug(f"Received raw response from LeMUR: {response_text}")
+            
+            speaker_map = json.loads(response_text)
+            
+            # Basic validation of the returned map
+            if not isinstance(speaker_map, dict) or not all(isinstance(v, str) for v in speaker_map.values()):
+                logger.error(f"LeMUR returned an invalid speaker map format: {speaker_map}")
+                return {}
+
+            logger.info(f"LeMUR successfully identified speaker roles: {speaker_map}")
+            return speaker_map
+
+        except json.JSONDecodeError:
+            logger.error(f"Failed to decode JSON from LeMUR response. Raw response: '{lemur_response.response}'", exc_info=True)
+            return {}
+        except Exception as e:
+            logger.error(f"An error occurred while using LeMUR: {e}", exc_info=True)
+            return {}
 
     def _build_system_prompt(
         self, 

@@ -54,9 +54,9 @@ class STTService:
         diarization: bool,
         language: str,
         stt_prompt: Optional[str] = None # Added for future use with AssemblyAI prompting
-    ) -> TranscriptionResult:
+    ) -> aai.Transcript:
         """
-        Transcribes audio using AssemblyAI's API.
+        Transcribes audio using AssemblyAI's API and returns the raw transcript object.
         The audio file at file_path is expected to be encrypted.
         """
         if not settings.assemblyai_api_key:
@@ -103,36 +103,9 @@ class STTService:
 
             # Log the link between our request ID and AssemblyAI's transcript ID for traceability
             logger.info(f"[{request_id}] AssemblyAI transcript created with ID: {transcript.id}")
-
-            if diarization and transcript.utterances:
-                 segments = [
-                    TranscriptSegment(start=utt.start/1000.0, end=utt.end/1000.0, text=utt.text, speaker=utt.speaker)
-                    for utt in transcript.utterances
-                ]
-            else:
-                # Fallback to words if utterances are not available
-                segments = [
-                    TranscriptSegment(start=word.start / 1000.0, end=word.end / 1000.0, text=word.text)
-                    for word in transcript.words
-                ]
-
-            # Correctly determine the detected language from the transcript's config.
-            detected_language_val = None
-            if transcript.config and transcript.config.language_code:
-                lang_code = transcript.config.language_code
-                if hasattr(lang_code, 'value'):
-                    detected_language_val = lang_code.value
-                else:
-                    detected_language_val = str(lang_code)
-
-            result = TranscriptionResult(
-                provider_transcript_id=transcript.id,
-                full_text=transcript.text or "",
-                segments=segments,
-                language_detected=detected_language_val # This will be 'de', 'en', or None
-            )
             logger.info(f"AssemblyAI transcription successful for ID {transcript.id}: {len(transcript.text or '')} characters")
-            return result
+            
+            return transcript
         except Exception as e:
             logger.error(f"Error during AssemblyAI transcription: {e}", exc_info=True)
             raise
@@ -140,6 +113,50 @@ class STTService:
             if decrypted_audio:
                 # Ensure the decrypted data (in-memory bytes) is securely cleared
                 data_encryption.secure_delete(decrypted_audio)
+
+    def create_transcription_result(
+        self, 
+        transcript: aai.Transcript, 
+        speaker_map: Optional[Dict[str, str]] = None
+    ) -> TranscriptionResult:
+        """
+        Converts a raw AssemblyAI transcript into our internal TranscriptionResult model,
+        applying speaker labels from the speaker_map if provided.
+        """
+        speaker_map = speaker_map or {}
+        
+        if transcript.config.speaker_labels and transcript.utterances:
+            segments = [
+                TranscriptSegment(
+                    start=utt.start/1000.0, 
+                    end=utt.end/1000.0, 
+                    text=utt.text, 
+                    speaker=speaker_map.get(utt.speaker, utt.speaker) # Use mapped speaker, fallback to original
+                )
+                for utt in transcript.utterances
+            ]
+        else:
+            # Fallback for non-diarized text (though this path is less likely if we enable LeMUR only with diarization)
+            segments = [
+                TranscriptSegment(start=word.start / 1000.0, end=word.end / 1000.0, text=word.text)
+                for word in transcript.words
+            ]
+
+        # Correctly determine the detected language from the transcript's config.
+        detected_language_val = None
+        if transcript.config and transcript.config.language_code:
+            lang_code = transcript.config.language_code
+            if hasattr(lang_code, 'value'):
+                detected_language_val = lang_code.value
+            else:
+                detected_language_val = str(lang_code)
+
+        return TranscriptionResult(
+            provider_transcript_id=transcript.id,
+            full_text=transcript.text or "",
+            segments=segments,
+            language_detected=detected_language_val
+        )
 
     async def delete_transcript(self, transcript_id: str):
         """
