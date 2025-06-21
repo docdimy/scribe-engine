@@ -117,6 +117,24 @@
                 grid-column: auto;
             }
         }
+        progress {
+            width: 100%;
+            margin-top: 10px;
+            height: 8px;
+            border-radius: 4px;
+        }
+        progress::-webkit-progress-bar {
+            background-color: #eee;
+            border-radius: 4px;
+        }
+        progress::-webkit-progress-value {
+            background-color: #007bff;
+            border-radius: 4px;
+            transition: width 0.1s linear;
+        }
+        progress.error::-webkit-progress-value {
+            background-color: #dc3545; /* Red */
+        }
     </style>
 </head>
 <body>
@@ -241,14 +259,14 @@
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
                     wakeLock.addEventListener('release', () => {
-                        console.log('Wake Lock wurde vom System freigegeben.');
+                        console.log('Wake Lock released by the system.');
                     });
-                    console.log('Wake Lock ist aktiv.');
+                    console.log('Wake Lock is active.');
                 } catch (err) {
-                    console.error(`Wake Lock konnte nicht aktiviert werden: ${err.name}, ${err.message}`);
+                    console.error(`Wake Lock could not be activated: ${err.name}, ${err.message}`);
                 }
             } else {
-                console.warn('Wake Lock API wird von diesem Browser nicht unterstützt.');
+                console.warn('Wake Lock API is not supported by this browser.');
             }
         };
 
@@ -256,14 +274,21 @@
             if (wakeLock !== null) {
                 wakeLock.release().then(() => {
                     wakeLock = null;
-                    console.log('Wake Lock wurde freigegeben.');
+                    console.log('Wake Lock released.');
                 });
             }
         };
 
-        const updateStatus = (message, type = 'info') => {
+        const updateStatus = (message, type) => {
             statusDiv.textContent = message;
-            statusDiv.className = type; // for potential styling
+            statusDiv.className = `status-${type}`; // Use classes for styling
+            
+            // Re-enable buttons only on final states (success or error)
+            if (type === 'success' || type === 'error') {
+                recordButton.disabled = false;
+                stopButton.disabled = true;
+                releaseWakeLock();
+            }
         };
 
         const setProgress = (value, isError = false) => {
@@ -364,92 +389,140 @@
         });
 
         const sendAudioToServer = async (audioBlob) => {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                updateStatus('Error: Please provide a valid API key.', 'error');
+                // Re-enable recording button so the user can try again after entering the key.
+                recordButton.disabled = false;
+                stopButton.disabled = true;
+                return;
+            }
+
             const fileExtension = audioBlob.type.split('/')[1].split(';')[0];
             const formData = new FormData();
             formData.append('file', audioBlob, `recording.${fileExtension}`);
             
-            // Append all values, letting the backend handle defaults for empty strings
-            formData.append('model', document.getElementById('model').value);
-            formData.append('specialty', document.getElementById('specialty').value);
-            formData.append('conversation_type', document.getElementById('conversationType').value);
-            formData.append('language', document.getElementById('language').value);
-            formData.append('output_language', document.getElementById('outputLanguage').value);
-            formData.append('output_format', document.getElementById('outputFormat').value);
-            formData.append('diarization', document.getElementById('diarization').checked); // Will be "true" or "false"
+            // Append all values from the form
+            formData.append('model', modelSelect.value);
+            formData.append('specialty', specialtyInput.value);
+            formData.append('conversation_type', conversationTypeInput.value);
+            formData.append('language', languageInput.value);
+            formData.append('output_language', outputLangInput.value);
+            formData.append('output_format', outputFormatSelect.value);
+            formData.append('diarization', diarizationCheckbox.checked);
             
-            if (document.getElementById('outputFormat').value === 'fhir') {
-                formData.append('fhir_bundle_type', document.getElementById('fhirBundleType').value);
+            if (outputFormatSelect.value === 'fhir') {
+                formData.append('fhir_bundle_type', fhirBundleTypeSelect.value);
             }
 
-            // --- Debugging: Log FormData content to the console ---
-            console.log("--- Sending FormData to Backend ---");
-            for (const [key, value] of formData.entries()) {
-                console.log(`${key}: ${value}`);
-            }
-            console.log("------------------------------------");
+            updateStatus('Uploading audio...', 'loading');
+            resultPre.textContent = '';
+            copyButton.style.display = 'none';
+            uploadProgress.style.display = 'block';
+            uploadProgress.value = 0;
+            uploadProgress.classList.remove('error');
+            let eventSource;
 
-            updateStatus('Transkription und Analyse läuft...', 'loading');
-            setProgress(50);
-            const startTime = Date.now();
-            
             try {
-                const apiKey = apiKeyInput.value.trim();
                 const response = await fetch('/v1/transcribe', {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'X-API-Key': apiKey, 
+                        'X-API-Key': apiKey,
                     },
-                    body: formData,
-                    signal: AbortSignal.timeout(300000) // 5 minute timeout
+                    body: formData
                 });
 
-                const duration = (Date.now() - startTime) / 1000;
-                setProgress(100);
-                const contentType = response.headers.get("content-type");
-
-                if (response.ok) {
-                    if (contentType && contentType.includes("application/json")) {
-                        const responseData = await response.json();
-                        resultPre.textContent = JSON.stringify(responseData, null, 2);
-                    } else if (contentType && contentType.includes("application/xml")) {
-                        const responseData = await response.text();
-                        resultPre.textContent = responseData;
-                    } else {
-                         const responseData = await response.text();
-                         resultPre.textContent = `Received unexpected content type: ${contentType}\\n\\n${responseData}`;
-                    }
-                    updateStatus(`Success after ${duration.toFixed(1)}s`, 'success');
-                } else {
-                     const errorText = await response.text();
-                    try {
-                        const errorJson = JSON.parse(errorText);
-                        updateStatus(`API Error: ${errorJson.detail || 'Unknown error'}`, 'error');
-                        resultPre.textContent = JSON.stringify(errorJson, null, 2);
-                    } catch (e) {
-                        updateStatus(`API Error: ${response.statusText}`, 'error');
-                        resultPre.textContent = errorText;
-                    }
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Unknown server error.' }));
+                    throw new Error(errorData.detail || `Server error: ${response.status}`);
                 }
+
+                // The server now returns a job ID
+                const jobData = await response.json();
+                const jobId = jobData.job_id;
+
+                if (!jobId) {
+                    throw new Error("Could not get Job ID from server.");
+                }
+
+                updateStatus('Connecting to status stream...', 'loading');
+                
+                // Connect to the SSE endpoint
+                eventSource = new EventSource(`/v1/transcribe/status/${jobId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.progress) {
+                        uploadProgress.value = data.progress;
+                    }
+
+                    if (data.status === 'processing') {
+                        updateStatus(data.message, 'loading');
+                    } else if (data.status === 'complete') {
+                        updateStatus('Processing complete.', 'success');
+                        displayResults(data.data);
+                        setTimeout(() => { uploadProgress.style.display = 'none'; }, 2000);
+                        eventSource.close();
+                    } else if (data.status === 'error') {
+                        updateStatus(`Error: ${data.message}`, 'error');
+                        uploadProgress.classList.add('error');
+                        eventSource.close();
+                    }
+                };
+
+                eventSource.onerror = (err) => {
+                    console.error('EventSource error:', err);
+                    updateStatus('Error connecting to the server. Please try again.', 'error');
+                    uploadProgress.style.display = 'none';
+                    eventSource.close();
+                };
+
             } catch (error) {
                 console.error('Error sending audio:', error);
-                updateStatus(`Client Error: ${error.message}`, 'error');
-                setProgress(100, true);
-            } finally {
-                releaseWakeLock();
-                // Reset buttons to initial state
-                recordButton.disabled = false;
-                stopButton.disabled = true;
+                updateStatus(`Error: ${error.message}`, 'error');
+                uploadProgress.style.display = 'none';
+                if (eventSource) {
+                    eventSource.close();
+                }
             }
         };
 
-        copyButton.addEventListener('click', () => {
+        const displayResults = (data) => {
+            const outputFormat = outputFormatSelect.value;
+            let resultText;
+            
+            if (outputFormat === 'json') {
+                // Pretty-print the full JSON response
+                resultText = JSON.stringify(data, null, 2);
+            } else if (outputFormat === 'text') {
+                resultText = data.transcript?.full_text || "No text found in the result.";
+            } else if (outputFormat === 'fhir') {
+                // For FHIR, pretty-print the fhir_bundle part of the JSON response
+                resultText = JSON.stringify(data.fhir_bundle, null, 2);
+            } else {
+                resultText = "Unknown output format selected.";
+            }
+
+            resultPre.textContent = resultText;
+            copyButton.style.display = 'block';
+        }
+
+        const copyToClipboard = () => {
             navigator.clipboard.writeText(resultPre.textContent).then(() => {
-                statusDiv.textContent = 'Result copied to clipboard!';
+                const originalStatus = statusDiv.textContent;
+                const originalClass = statusDiv.className;
+                updateStatus('Result copied to clipboard!', 'success');
+                setTimeout(() => {
+                    statusDiv.textContent = originalStatus;
+                    statusDiv.className = originalClass;
+                }, 2000);
             }, () => {
-                statusDiv.textContent = 'Failed to copy result.';
+                updateStatus('Failed to copy result.', 'error');
             });
-        });
+        };
+
+        copyButton.addEventListener('click', copyToClipboard);
     </script>
 </body>
 </html>

@@ -4,9 +4,10 @@ Scribe Engine - FastAPI Main Application
 
 import time
 import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, AsyncGenerator
 import asyncio
 import httpx
 import os
@@ -14,7 +15,7 @@ import json
 
 from fastapi import FastAPI, HTTPException, Request, Depends, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -27,6 +28,7 @@ from starlette.responses import Response, FileResponse
 from app.config import settings, OutputFormat, ModelName, FHIRBundleType
 from app.core.logging import setup_logging, get_logger, audit_logger
 from app.core.security import get_current_user, security_manager, AuthenticationError
+from app.models.requests import JobCreationResponse
 from app.models.responses import (
     ScribeResponse, HealthCheckResponse, ErrorResponse, 
     RateLimitResponse, TranscriptionResult, AnalysisResult
@@ -47,6 +49,9 @@ audio_processing_duration = Histogram('audio_processing_duration_seconds', 'Audi
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
+
+# SSE Job Queues
+job_status_queues: Dict[str, asyncio.Queue] = {}
 
 # Service instances
 audio_processor = AudioProcessor()
@@ -264,10 +269,133 @@ async def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+async def run_transcription_pipeline(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    job_id: str,
+    queue: asyncio.Queue,
+    user_info: dict,
+    audio_data: bytes,
+    content_type: str,
+    output_format: OutputFormat,
+    model: ModelName,
+    diarization: bool,
+    specialty: str,
+    conversation_type: str,
+    language: str,
+    output_language: Optional[str],
+    fhir_bundle_type: Optional[FHIRBundleType]
+):
+    """
+    The full transcription and analysis pipeline, designed to run in the background.
+    It pushes status updates to a queue for SSE.
+    """
+    request_id = request.state.request_id
+    temp_audio_file = None
+
+    try:
+        # --- 1. Save and encrypt audio file (can be slow on some filesystems) ---
+        # Send a message FIRST, so the user doesn't see a long "Connecting..." message.
+        await queue.put(json.dumps({"status": "processing", "message": "Processing uploaded audio...", "progress": 10}))
+        await asyncio.sleep(0.01) # Allow the message to be sent before blocking I/O
+
+        temp_audio_file = await process_and_save_audio(audio_data, content_type, specialty)
+        file_path = temp_audio_file.name
+
+        # --- 2. Transcription (slow operation) ---
+        logger.info(f"[{request_id}] Starting transcription with AssemblyAI...")
+        await queue.put(json.dumps({"status": "processing", "message": "Starting transcription... (this may take a moment)", "progress": 20}))
+        await asyncio.sleep(0.01) # Force event to be sent before blocking
+        
+        transcript_result = await stt_service.transcribe(
+            request_id=request_id,
+            file_path=file_path,
+            diarization=diarization,
+            language=language,
+        )
+        await queue.put(json.dumps({"status": "processing", "message": f"Transcription complete. {len(transcript_result.full_text)} characters recognized.", "progress": 80}))
+        
+        # Add the deletion of the transcript to background tasks
+        if transcript_result.provider_transcript_id:
+            background_tasks.add_task(
+                stt_service.delete_transcript, transcript_result.provider_transcript_id
+            )
+
+        # Determine the language for the LLM analysis output.
+        if output_language:
+            llm_output_lang = output_language
+        elif transcript_result.language_detected:
+            llm_output_lang = transcript_result.language_detected
+        else:
+            logger.warning(f"[{request_id}] Could not determine language. Defaulting LLM output to English.")
+            llm_output_lang = "en"
+        
+        # --- 3. Analysis (slow-ish operation) ---
+        logger.info(f"[{request_id}] Starting analysis with LLM...")
+        await queue.put(json.dumps({"status": "processing", "message": "Starting medical analysis...", "progress": 85}))
+        await asyncio.sleep(0.01) # Force event to be sent before blocking
+        analysis_result = await llm_service.analyze(
+            transcript=transcript_result.full_text,
+            model=model.value,
+            specialty=specialty,
+            conversation_type=conversation_type,
+            output_language=llm_output_lang
+        )
+        await queue.put(json.dumps({"status": "processing", "message": "Analysis complete. Formatting result...", "progress": 95}))
+        logger.info(f"[{request_id}] LLM analysis completed successfully.")
+
+        # --- 4. Format the output ---
+        fhir_bundle = None
+        if output_format == OutputFormat.FHIR:
+            fhir_bundle = await fhir_service.create_fhir_bundle(
+                request_id=request_id,
+                transcript=transcript_result, 
+                analysis=analysis_result,
+                specialty=specialty,
+                conversation_type=conversation_type,
+                bundle_type=fhir_bundle_type
+            )
+            logger.info(f"[{request_id}] Analysis formatted to FHIR.")
+
+        # --- 5. Create final response ---
+        processing_time_ms = int((time.time() - request.state.start_time) * 1000)
+
+        response_data = ScribeResponse(
+            request_id=request_id,
+            timestamp=datetime.utcnow(),
+            transcript=transcript_result,
+            analysis=analysis_result,
+            output_format=output_format,
+            processing_time_ms=processing_time_ms,
+            fhir_bundle=fhir_bundle
+        )
+        
+        final_json = json.loads(response_data.model_dump_json(exclude_none=True))
+        await queue.put(json.dumps({"status": "complete", "data": final_json, "progress": 100}))
+        
+    except Exception as e:
+        logger.error(f"Request {request_id} failed in background pipeline: {e}", exc_info=True)
+        error_detail = "An unexpected internal error occurred during processing."
+        if isinstance(e, HTTPException):
+            error_detail = e.detail
+        await queue.put(json.dumps({"status": "error", "message": error_detail, "progress": 100}))
+    finally:
+        await queue.put("__END__")
+        # Cleanup
+        if temp_audio_file:
+            try:
+                temp_audio_file.close()
+                os.remove(temp_audio_file.name)
+                logger.info(f"Request {request_id}: Cleaned up temporary file {temp_audio_file.name}")
+            except Exception as e:
+                logger.error(f"Request {request_id}: Failed to cleanup temporary file {temp_audio_file.name}: {e}", exc_info=True)
+
+
 # Main endpoint for audio transcription
 @app.post(
     "/v1/transcribe",
-    response_model=ScribeResponse,
+    response_model=JobCreationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         400: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
@@ -294,11 +422,10 @@ async def transcribe_audio(
     fhir_bundle_type: Optional[FHIRBundleType] = Form(None)
 ):
     """
-    This endpoint receives an audio file and configuration, transcribes the audio,
-    analyzes the content with an LLM, and returns the result in the specified format.
+    This endpoint receives an audio file and configuration, starts the processing
+    in the background and returns a job ID to track the status via SSE.
     """
     request_id = request.state.request_id
-    temp_audio_file = None
     
     # --- Input Validation ---
     if language != "auto" and language not in settings.supported_languages:
@@ -311,107 +438,91 @@ async def transcribe_audio(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unsupported output language '{output_language}'. Supported are: {', '.join(settings.supported_languages)}"
         )
-    
+
+    # Read the audio file into memory immediately
+    audio_data = await audio_file.read()
+    content_type = audio_file.content_type
+
+    job_id = str(uuid.uuid4())
+    job_status_queues[job_id] = asyncio.Queue()
+
+    background_tasks.add_task(
+        run_transcription_pipeline,
+        request=request,
+        background_tasks=background_tasks,
+        job_id=job_id,
+        queue=job_status_queues[job_id],
+        user_info=user_info,
+        audio_data=audio_data,
+        content_type=content_type,
+        output_format=output_format,
+        model=model,
+        diarization=diarization,
+        specialty=specialty,
+        conversation_type=conversation_type,
+        language=language,
+        output_language=output_language,
+        fhir_bundle_type=fhir_bundle_type,
+    )
+
+    return JobCreationResponse(job_id=job_id)
+
+async def sse_event_generator(request: Request, job_id: str) -> AsyncGenerator[str, None]:
+    """Yields server-sent events for a given job ID."""
+    queue = job_status_queues.get(job_id)
+    if not queue:
+        # This part will not be reached if we raise HTTPException before,
+        # but it's good practice.
+        logger.warning(f"SSE generator started for non-existent job_id: {job_id}")
+        return
+
     try:
-        # --- 1. Save and encrypt audio file ---
-        # This returns an open temporary file that must be closed later
-        temp_audio_file = await process_and_save_audio(audio_file, specialty)
-        file_path = temp_audio_file.name
+        while True:
+            if await request.is_disconnected():
+                logger.info(f"Client disconnected from SSE stream for job_id: {job_id}")
+                break
 
-        # --- 2. Transcription ---
-        logger.info(f"[{request_id}] Starting transcription with AssemblyAI...")
-        
-        transcript_result = await stt_service.transcribe(
-            request_id=request_id,
-            file_path=file_path,
-            diarization=diarization,
-            language=language,
-        )
-        
-        # Add the deletion of the transcript to background tasks
-        if transcript_result.provider_transcript_id:
-            background_tasks.add_task(
-                stt_service.delete_transcript, transcript_result.provider_transcript_id
-            )
-
-        # Determine the language for the LLM analysis output.
-        # Priority: 1. User-specified output language.
-        #           2. Detected language from STT.
-        #           3. Fallback to English.
-        if output_language:
-            llm_output_lang = output_language
-        elif transcript_result.language_detected:
-            llm_output_lang = transcript_result.language_detected
-        else:
-            logger.warning(f"[{request_id}] Could not determine language. Defaulting LLM output to English.")
-            llm_output_lang = "en"
-        
-        # --- 3. Analysis ---
-        logger.info(f"[{request_id}] Starting analysis with LLM...")
-        analysis_result = await llm_service.analyze(
-            transcript=transcript_result.full_text,
-            model=model.value,
-            specialty=specialty,
-            conversation_type=conversation_type,
-            output_language=llm_output_lang
-        )
-        
-        logger.info(f"[{request_id}] LLM analysis completed successfully.")
-
-        # --- 4. Format the output ---
-        fhir_bundle = None
-        if output_format == OutputFormat.FHIR:
-            fhir_bundle = await fhir_service.create_fhir_bundle(
-                request_id=request_id,
-                transcript=transcript_result, 
-                analysis=analysis_result,
-                specialty=specialty,
-                conversation_type=conversation_type,
-                bundle_type=fhir_bundle_type
-            )
-            logger.info(f"[{request_id}] Analysis formatted to FHIR.")
-
-        # --- 5. Create final response ---
-        processing_time_ms = int((time.time() - request.state.start_time) * 1000)
-
-        response_data = ScribeResponse(
-            request_id=request_id,
-            timestamp=datetime.utcnow(),
-            transcript=transcript_result,
-            analysis=analysis_result,
-            output_format=output_format,
-            processing_time_ms=processing_time_ms
-        )
-
-        if output_format == OutputFormat.FHIR:
-            response_data.fhir_bundle = fhir_bundle
-            # Use model_dump_json to handle complex nested models like FHIR resources
-            # Then load it back to a dict for JSONResponse to handle correctly.
-            return JSONResponse(content=json.loads(response_data.model_dump_json(exclude_none=True)))
-        elif output_format == OutputFormat.XML:
-            xml_content = _create_xml_output(request_id, transcript_result, analysis_result)
-            response_data.xml_content = xml_content
-            return PlainTextResponse(content=xml_content, media_type="application/xml")
-
-        return response_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Request {request_id} failed with an unexpected error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected internal error occurred.",
-        )
-    finally:
-        if temp_audio_file:
             try:
-                temp_audio_file.close()
-                os.remove(temp_audio_file.name)
-                logger.info(f"Request {request_id}: Cleaned up temporary file {temp_audio_file.name}")
-            except Exception as e:
-                logger.error(f"Request {request_id}: Failed to cleanup temporary file {temp_audio_file.name}: {e}", exc_info=True)
+                message = await asyncio.wait_for(queue.get(), timeout=30)
+                if message == "__END__":
+                    logger.info(f"SSE stream finished for job_id: {job_id}")
+                    break
+                
+                yield f"data: {message}\n\n"
+                queue.task_done()
+            except asyncio.TimeoutError:
+                # Send a keep-alive comment to prevent client/proxy timeouts
+                yield ": keep-alive\n\n"
 
+    except asyncio.CancelledError:
+        logger.info(f"SSE generator cancelled for job_id: {job_id}")
+    finally:
+        # Clean up the queue once the client has disconnected or the job is done
+        if job_id in job_status_queues:
+            # Empty the queue to unblock the background task if it's still putting things
+            while not job_status_queues[job_id].empty():
+                job_status_queues[job_id].get_nowait()
+                job_status_queues[job_id].task_done()
+            del job_status_queues[job_id]
+            logger.info(f"Cleaned up queue for job_id: {job_id}")
+
+@app.get("/v1/transcribe/status/{job_id}")
+async def get_transcription_status(request: Request, job_id: str):
+    """
+    Endpoint to get real-time status updates for a transcription job using SSE.
+    """
+    if job_id not in job_status_queues:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job ID not found or already completed.")
+    
+    return StreamingResponse(
+        sse_event_generator(request, job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 def _create_xml_output(request_id: str, transcript: TranscriptionResult, analysis: AnalysisResult) -> str:
     """Create XML output for transcript and analysis"""

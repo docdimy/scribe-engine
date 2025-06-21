@@ -11,4 +11,8 @@ class HealthCheckRequest(BaseModel):
     detailed: bool = Field(
         default=False,
         description="Request detailed health information"
-    ) 
+    )
+
+class JobCreationResponse(BaseModel):
+    """Response model for endpoints that start a background job."""
+    job_id: str = Field(description="Unique identifier for the created job.") 

@@ -160,25 +160,24 @@ class STTService:
             logger.error(f"Failed to delete AssemblyAI transcript ID {transcript_id}: {e}", exc_info=True)
 
 
-async def process_and_save_audio(file: UploadFile, specialty: str) -> NamedTemporaryFile:
+async def process_and_save_audio(audio_data: bytes, content_type: str, specialty: str) -> NamedTemporaryFile:
     """
-    Processes the uploaded audio file and saves it to a temporary file.
+    Processes uploaded audio data and saves it to a temporary file.
     - Validates audio format and content.
     - Encrypts the audio data before saving.
     - Returns the open NamedTemporaryFile object.
     """
     logger.info("Starting audio processing...")
 
-    if file.content_type not in settings.supported_audio_formats:
-        logger.warning(f"Unsupported audio format: {file.content_type}")
+    if content_type not in settings.supported_audio_formats:
+        logger.warning(f"Unsupported audio format: {content_type}")
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported audio format: {file.content_type}",
+            detail=f"Unsupported audio format: {content_type}",
         )
     
     temp_file = None
     try:
-        audio_data = await file.read()
         if not audio_data:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No audio data.")
 
